@@ -1,0 +1,58 @@
+{
+  "tool": "check_wake.py",
+  "model_root": "D:\\smart-home-models",
+  "candidates": {
+    "小屋小屋": {
+      "directory": "tools\\voice-check\\cases\\audio\\wake\\xiaowu-xiaowu",
+      "clips": 0,
+      "required": 20,
+      "success": 0,
+      "min_hits": 18,
+      "passed": false,
+      "results": []
+    },
+    "你好小屋": {
+      "directory": "tools\\voice-check\\cases\\audio\\wake\\nihao-xiaowu",
+      "clips": 0,
+      "required": 20,
+      "success": 0,
+      "min_hits": 18,
+      "passed": false,
+      "results": []
+    }
+  },
+  "negative": {
+    "directory": "tools\\voice-check\\cases\\noise-30min",
+    "files": 0,
+    "audio_seconds": 0,
+    "required_seconds": 1800.0,
+    "corpus_complete": false,
+    "false_wakes": 0,
+    "false_wake_hard_gate": false,
+    "duration_hard_gate": true,
+    "results": []
+  },
+  "self_trigger": {
+    "directory": "tools\\voice-check\\cases\\self-trigger",
+    "files": 0,
+    "required_files": 1,
+    "audio_seconds": 0,
+    "required_seconds": 1.0,
+    "corpus_complete": false,
+    "kws_detections": 0,
+    "asr_forbidden_term_hits": 0,
+    "forbidden_terms": [
+      "小屋小屋",
+      "你好小屋",
+      "打开",
+      "关闭",
+      "调到",
+      "调成",
+      "播报"
+    ],
+    "hard_gate": true,
+    "results": []
+  },
+  "passed": false,
+  "note": "Each candidate requires >=18/20; negative corpus duration must be >=1800.0s (false-wake count is report-only); self-trigger corpus must be non-empty and have zero KWS detections and zero forbidden ASR terms."
+}

@@ -74,7 +74,10 @@ def main() -> int:
             play(reply, reply_sr, output_device.index)
             time.sleep(1.0)
 
-        audio = np.concatenate(list(blocks.queue)) if not blocks.empty() else np.empty(0, dtype=np.float32)
+        collected: list[np.ndarray] = []
+        while not blocks.empty():
+            collected.append(blocks.get_nowait())
+        audio = np.concatenate(collected) if collected else np.empty(0, dtype=np.float32)
         out = args.out_dir / f"playback-{index:02d}.wav"
         sf.write(str(out), audio, config.SAMPLE_RATE, subtype="PCM_16")
         peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
