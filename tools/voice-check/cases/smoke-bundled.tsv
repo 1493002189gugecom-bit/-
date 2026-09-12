@@ -1,0 +1,6 @@
+﻿# smoke test against bundled SenseVoice samples (no expected keywords; only checks the pipeline runs)
+en	D:\smart-home-models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\test_wavs\en.wav
+ja	D:\smart-home-models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\test_wavs\ja.wav
+ko	D:\smart-home-models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\test_wavs\ko.wav
+yue	D:\smart-home-models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\test_wavs\yue.wav
+zh	D:\smart-home-models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\test_wavs\zh.wav

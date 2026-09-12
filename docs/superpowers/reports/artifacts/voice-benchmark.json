@@ -1,0 +1,139 @@
+{
+  "tool": "benchmark_voice.py",
+  "provider": "cpu",
+  "model_root": "D:\\smart-home-models",
+  "runs": 5,
+  "asr": {
+    "cold_seconds": 0.176,
+    "hot_median_seconds": 0.171,
+    "all_seconds": [
+      0.176,
+      0.169,
+      0.174,
+      0.174,
+      0.168
+    ],
+    "transcripts": [
+      "开饭时间早上9点至下午5点。",
+      "开饭时间早上9点至下午5点。",
+      "开饭时间早上9点至下午5点。",
+      "开饭时间早上9点至下午5点。",
+      "开饭时间早上9点至下午5点。"
+    ]
+  },
+  "tts": {
+    "metric": "full synchronous synthesis time (not first audible output)",
+    "full_synthesis_cold_seconds": 3.418,
+    "full_synthesis_hot_median_seconds": 3.46,
+    "all_seconds": [
+      3.418,
+      3.392,
+      3.47,
+      3.555,
+      3.45
+    ],
+    "audio_seconds": [
+      3.082,
+      3.083,
+      3.083,
+      3.083,
+      3.083
+    ]
+  },
+  "vad": {
+    "frames": 206,
+    "speech_frames": 146,
+    "returned_to_silence": true
+  },
+  "memory": {
+    "rss_mb": 797.5,
+    "peak_working_set_mb": 797.5
+  },
+  "steps": [
+    {
+      "step": "init_kws",
+      "seconds": 0.89,
+      "rss_mb": 76.8,
+      "peak_working_set_mb": 76.8
+    },
+    {
+      "step": "init_vad",
+      "seconds": 0.007,
+      "rss_mb": 77.1,
+      "peak_working_set_mb": 77.1
+    },
+    {
+      "step": "init_asr",
+      "seconds": 1.34,
+      "rss_mb": 356.5,
+      "peak_working_set_mb": 368.7
+    },
+    {
+      "step": "init_tts",
+      "seconds": 1.747,
+      "rss_mb": 586.7,
+      "peak_working_set_mb": 587.3
+    },
+    {
+      "step": "asr",
+      "seconds": 0.176,
+      "rss_mb": 600.9,
+      "peak_working_set_mb": 600.9
+    },
+    {
+      "step": "asr",
+      "seconds": 0.169,
+      "rss_mb": 603.7,
+      "peak_working_set_mb": 603.7
+    },
+    {
+      "step": "asr",
+      "seconds": 0.174,
+      "rss_mb": 603.7,
+      "peak_working_set_mb": 603.7
+    },
+    {
+      "step": "asr",
+      "seconds": 0.174,
+      "rss_mb": 603.7,
+      "peak_working_set_mb": 603.7
+    },
+    {
+      "step": "asr",
+      "seconds": 0.168,
+      "rss_mb": 603.7,
+      "peak_working_set_mb": 603.7
+    },
+    {
+      "step": "tts",
+      "seconds": 3.418,
+      "rss_mb": 706.2,
+      "peak_working_set_mb": 708.2
+    },
+    {
+      "step": "tts",
+      "seconds": 3.392,
+      "rss_mb": 795.6,
+      "peak_working_set_mb": 796.6
+    },
+    {
+      "step": "tts",
+      "seconds": 3.47,
+      "rss_mb": 796.6,
+      "peak_working_set_mb": 796.6
+    },
+    {
+      "step": "tts",
+      "seconds": 3.555,
+      "rss_mb": 797.4,
+      "peak_working_set_mb": 797.4
+    },
+    {
+      "step": "tts",
+      "seconds": 3.45,
+      "rss_mb": 797.4,
+      "peak_working_set_mb": 797.4
+    }
+  ],
+  "gpu_expected": false
+}

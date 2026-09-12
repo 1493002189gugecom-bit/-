@@ -1,0 +1,31 @@
+# Phase A5 ASR cases. id<TAB>wav<TAB>required tokens separated by spaces<TAB>phrase to read
+asr-01	tools/voice-check/cases/audio/asr-01.wav	客厅 灯 打开	把客厅的灯打开。
+asr-02	tools/voice-check/cases/audio/asr-02.wav	卧室 灯 关闭	请关闭卧室的灯。
+asr-03	tools/voice-check/cases/audio/asr-03.wav	空调 二十六度|26度	把空调调到二十六度。
+asr-04	tools/voice-check/cases/audio/asr-04.wav	厨房 百分之五十|50%|50百分比	把厨房的灯调到百分之五十。
+asr-05	tools/voice-check/cases/audio/asr-05.wav	客厅 制冷	打开客厅空调的制冷模式。
+asr-06	tools/voice-check/cases/audio/asr-06.wav	卧室 空调 关闭	把卧室空调关掉。
+asr-07	tools/voice-check/cases/audio/asr-07.wav	爸爸 吃饭	叫爸爸来吃饭。
+asr-08	tools/voice-check/cases/audio/asr-08.wav	孩子 吃饭	通知孩子吃饭了。
+asr-09	tools/voice-check/cases/audio/asr-09.wav	爸爸 孩子 吃饭	叫爸爸和孩子吃饭。
+asr-10	tools/voice-check/cases/audio/asr-10.wav	妈妈 厨房	妈妈现在在厨房。
+asr-11	tools/voice-check/cases/audio/asr-11.wav	爸爸 卧室	爸爸在卧室。
+asr-12	tools/voice-check/cases/audio/asr-12.wav	孩子 客厅	孩子在客厅。
+asr-13	tools/voice-check/cases/audio/asr-13.wav	二十八度|28度 热	现在二十八度，有点热。
+asr-14	tools/voice-check/cases/audio/asr-14.wav	二十三度|23度 冷	室温二十三度，我觉得冷。
+asr-15	tools/voice-check/cases/audio/asr-15.wav	不要 客厅 灯	不要打开客厅的灯。
+asr-16	tools/voice-check/cases/audio/asr-16.wav	别 关闭 空调	先别关闭空调。
+asr-17	tools/voice-check/cases/audio/asr-17.wav	客厅 还是 卧室	你说的是客厅还是卧室？
+asr-18	tools/voice-check/cases/audio/asr-18.wav	亮 一点	这里太暗了，亮一点。
+asr-19	tools/voice-check/cases/audio/asr-19.wav	凉快 一点	房间有点热，凉快一点。
+asr-20	tools/voice-check/cases/audio/asr-20.wav	刚才 温度 一度|1度	刚才那个温度再低一度。
+asr-21	tools/voice-check/cases/audio/asr-21.wav	它 关闭	把它关闭。
+asr-22	tools/voice-check/cases/audio/asr-22.wav	所有 灯	关闭所有的灯。
+asr-23	tools/voice-check/cases/audio/asr-23.wav	客厅 卧室 空调	把客厅和卧室的空调都打开。
+asr-24	tools/voice-check/cases/audio/asr-24.wav	百分之三十|30%|30百分比	把灯调到百分之三十。
+asr-25	tools/voice-check/cases/audio/asr-25.wav	二十五点五度|25.5度	空调设成二十五点五度。
+asr-26	tools/voice-check/cases/audio/asr-26.wav	下午五点|下午5点	下午五点提醒我做饭。
+asr-27	tools/voice-check/cases/audio/asr-27.wav	小朋友 起床	小朋友，该起床了。
+asr-28	tools/voice-check/cases/audio/asr-28.wav	位置 不知道	我不知道爸爸的位置。
+asr-29	tools/voice-check/cases/audio/asr-29.wav	全屋 播报	需要全屋播报吗？
+asr-30	tools/voice-check/cases/audio/asr-30.wav	退出 对话	退出连续对话。

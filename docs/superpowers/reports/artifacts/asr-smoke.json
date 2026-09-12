@@ -1,0 +1,66 @@
+{
+  "tool": "check_asr.py",
+  "cases": 5,
+  "hits": 5,
+  "min_hits": null,
+  "threshold_basis": "no gate applied (smoke run); hit 5/5",
+  "passed": null,
+  "total_seconds": 1.0,
+  "results": [
+    {
+      "id": "en",
+      "wav": "D:\\smart-home-models\\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\\test_wavs\\en.wav",
+      "expected": [],
+      "transcript": "The tribal chieftain called for the boy and presented him with 50 pieces of code.",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {},
+      "missing": [],
+      "seconds": 0.322
+    },
+    {
+      "id": "ja",
+      "wav": "D:\\smart-home-models\\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\\test_wavs\\ja.wav",
+      "expected": [],
+      "transcript": "うちの中学は弁当制で持っていきない場合は50円の学校販売のパンを買う。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {},
+      "missing": [],
+      "seconds": 0.212
+    },
+    {
+      "id": "ko",
+      "wav": "D:\\smart-home-models\\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\\test_wavs\\ko.wav",
+      "expected": [],
+      "transcript": "조금만 생각을 하면서 살면 훨씬 편할 거야.",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {},
+      "missing": [],
+      "seconds": 0.143
+    },
+    {
+      "id": "yue",
+      "wav": "D:\\smart-home-models\\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\\test_wavs\\yue.wav",
+      "expected": [],
+      "transcript": "呢几个字都表达唔到我想讲嘅意思。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {},
+      "missing": [],
+      "seconds": 0.156
+    },
+    {
+      "id": "zh",
+      "wav": "D:\\smart-home-models\\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17\\test_wavs\\zh.wav",
+      "expected": [],
+      "transcript": "开饭时间早上9点至下午5点。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {},
+      "missing": [],
+      "seconds": 0.163
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "tool": "check_wake.py",
+  "model_root": "D:\\smart-home-models",
+  "candidates": {
+    "小屋小屋": {
+      "directory": "tools\\voice-check\\cases\\audio\\wake-smoke\\xiaowu-xiaowu",
+      "clips": 1,
+      "required": 1,
+      "success": 1,
+      "min_hits": 1,
+      "passed": true,
+      "results": [
+        {
+          "wav": "tools\\voice-check\\cases\\audio\\wake-smoke\\xiaowu-xiaowu\\synthetic.wav",
+          "audio_seconds": 1.483,
+          "detections": [
+            "小屋小屋"
+          ],
+          "kws_seconds": 0.03,
+          "expected": "小屋小屋",
+          "hit": true
+        }
+      ]
+    },
+    "你好小屋": {
+      "directory": "tools\\voice-check\\cases\\audio\\wake-smoke\\nihao-xiaowu",
+      "clips": 1,
+      "required": 1,
+      "success": 0,
+      "min_hits": 1,
+      "passed": false,
+      "results": [
+        {
+          "wav": "tools\\voice-check\\cases\\audio\\wake-smoke\\nihao-xiaowu\\synthetic.wav",
+          "audio_seconds": 1.502,
+          "detections": [],
+          "kws_seconds": 0.023,
+          "expected": "你好小屋",
+          "hit": false
+        }
+      ]
+    }
+  },
+  "negative": {
+    "directory": "tools\\voice-check\\cases\\noise-30min",
+    "files": 0,
+    "audio_seconds": 0,
+    "required_seconds": 1800.0,
+    "corpus_complete": false,
+    "false_wakes": 0,
+    "false_wake_hard_gate": false,
+    "duration_hard_gate": true,
+    "results": []
+  },
+  "self_trigger": {
+    "directory": "tools\\voice-check\\cases\\audio\\self-trigger-smoke",
+    "files": 1,
+    "required_files": 1,
+    "audio_seconds": 0.871,
+    "required_seconds": 0.5,
+    "corpus_complete": true,
+    "kws_detections": 0,
+    "asr_forbidden_term_hits": 0,
+    "forbidden_terms": [
+      "小屋小屋",
+      "你好小屋",
+      "打开",
+      "关闭",
+      "调到",
+      "调成",
+      "播报"
+    ],
+    "hard_gate": true,
+    "results": [
+      {
+        "wav": "tools\\voice-check\\cases\\audio\\self-trigger-smoke\\fixed-reply.wav",
+        "audio_seconds": 0.871,
+        "detections": [],
+        "kws_seconds": 0.017,
+        "asr_transcript": "收到。",
+        "forbidden_term_hits": []
+      }
+    ]
+  },
+  "passed": null,
+  "note": "Each candidate requires >=1/1; negative corpus duration must be >=1800.0s (false-wake count is report-only); self-trigger corpus must be non-empty and have zero KWS detections and zero forbidden ASR terms."
+}
