@@ -150,7 +150,9 @@
 | 家庭状态与工具服务 | `apps/home-service/` |
 | Unity 小屋工程 | `apps/unity-house/` |
 | 设计、计划、核验记录、报告 | `docs/superpowers/` |
-| 模型权重（不入库） | `models/` |
+| 模型权重（不入库） | **默认 `D:\smart-home-models\`**（用户要求放 D 盘），可用环境变量 `SMART_HOME_MODELS_DIR` 覆盖 |
+
+**模型路径约定**：模型文件一律不入库，且默认存放在 D 盘而非仓库所在盘。脚本通过 `SMART_HOME_MODELS_DIR` 读取根目录，默认值为 `D:\smart-home-models`；仓库内 `models/` 只作为回退位置（若该盘不可用），并且在 `.gitignore` 中已被忽略。下载前先确认目标盘可用空间。
 
 **Unity 工程必须是 `apps/unity-house/`。** `Library/`、`Temp/`、`Obj/`、`Build/`、`Builds/`、`Logs/`、`UserSettings/`、`.vs/` 是生成物，不入库；`Assets/`、`Packages/`、`ProjectSettings/` 与 `.meta` 必须入库。
 
@@ -328,7 +330,9 @@ py -3.11 -m venv .venv
 2. 许可证名称、是否允许预期用途、是否要求署名。
 3. Windows + Python 3.11 + sherpa-onnx 所需 API 存在（KWS 的 `text2token` 可用）。
 
-核验结论写入 `docs/superpowers/notes/2026-09-12-model-review.md`，含来源链接与核验日期。模型文件放在 `models/`（已忽略）。
+核验结论写入 `docs/superpowers/notes/2026-09-12-model-review.md`，含来源链接与核验日期。
+
+**下载位置（用户要求）**：模型默认下载到 `D:\smart-home-models\`，不放仓库所在盘。运行时通过环境变量 `SMART_HOME_MODELS_DIR` 指定，脚本默认值即该路径；仓库内 `models/` 仅作回退，且已被忽略。下载前用 `Get-PSDrive` 确认 D 盘可用空间，并记录每个模型的实际大小与总占用。
 
 **通过门槛**：四个模型的地址、大小、许可证均有明确结论；许可证不清晰的不下载，并在报告中说明替代方案。
 
