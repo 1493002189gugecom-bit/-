@@ -36,9 +36,8 @@ def test_edge_candidate_voices_are_chinese():
 
 
 def test_render_to_writes_a_playable_wav(tmp_path, monkeypatch):
-    """The Edge path is stubbed with a real MP3 payload to avoid network tests."""
-    mp3 = _make_mp3_bytes()
-    monkeypatch.setattr(voice_models, "_edge_synthesize", lambda text, voice: _decode(mp3))
+    """The Edge fetch is stubbed with decoded audio so no network is used."""
+    monkeypatch.setattr(voice_models, "_edge_synthesize", lambda text, voice: _stub_audio())
     engine = voice_models.TtsEngine(provider="edge")
     out = tmp_path / "case.wav"
     samples, rate = engine.render_to("测试文本", out)
@@ -46,6 +45,21 @@ def test_render_to_writes_a_playable_wav(tmp_path, monkeypatch):
     written, written_rate = sf.read(str(out), dtype="float32")
     assert written_rate == rate
     assert len(written) == len(samples)
+
+
+def test_edge_audio_is_decoded_and_averaged_to_mono(tmp_path):
+    """The real decoder must downmix stereo payloads to mono."""
+    stereo = np.stack([_tone(), _tone() * 0.5], axis=1)
+    payload = _encode_wav(stereo)
+    samples, rate = voice_models._decode_edge_audio(payload)
+    assert samples.ndim == 1
+    assert rate == 24000
+    assert len(samples) == len(stereo)
+
+
+def test_edge_decoder_rejects_empty_payload():
+    with pytest.raises(Exception):
+        voice_models._decode_edge_audio(b"")
 
 
 def test_edge_failure_is_not_substituted_locally(monkeypatch):
@@ -64,18 +78,45 @@ def test_speaker_id_arguments_rejected_for_edge():
         voice_models.synthesize(engine, "测试", speaker_id=47)
 
 
-def _make_mp3_bytes() -> bytes:
-    """Return a tiny real MP3 produced by edge-tts if one is cached, else skip."""
-    cached = REPO / "docs/superpowers/reports/artifacts/tts-compare/_probe.mp3"
-    if cached.exists():
-        data = cached.read_bytes()
-        if data:
-            return data
-    pytest.skip("no cached edge-tts MP3 available for the stub")
+def test_edge_retries_are_bounded(monkeypatch):
+    """A failing fetch must give up rather than hang forever."""
+    attempts = {"count": 0}
+
+    async def fake_stream(self):  # pragma: no cover - replaced below
+        raise AssertionError("unused")
+
+    monkeypatch.setattr(config, "EDGE_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(config, "EDGE_RETRY_DELAY_SECONDS", 0.0)
+
+    import edge_tts
+
+    class FakeCommunicate:
+        def __init__(self, *args, **kwargs):
+            attempts["count"] += 1
+
+        async def stream(self):
+            raise RuntimeError("network down")
+            yield  # pragma: no cover
+
+    monkeypatch.setattr(edge_tts, "Communicate", FakeCommunicate, raising=False)
+    with pytest.raises(RuntimeError, match="failed after 2 attempts"):
+        voice_models._edge_synthesize("测试", "zh-CN-XiaoxiaoNeural")
+    assert attempts["count"] == 2
+    del fake_stream
 
 
-def _decode(payload: bytes) -> tuple[np.ndarray, int]:
+def _tone(seconds: float = 0.25, rate: int = 24000) -> np.ndarray:
+    t = np.arange(int(seconds * rate), dtype=np.float32) / rate
+    return (0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+
+
+def _stub_audio() -> tuple[np.ndarray, int]:
+    return _tone(), 24000
+
+
+def _encode_wav(samples: np.ndarray, rate: int = 24000) -> bytes:
     import io
 
-    samples, rate = sf.read(io.BytesIO(payload), dtype="float32", always_2d=False)
-    return np.asarray(samples, dtype=np.float32), int(rate)
+    buffer = io.BytesIO()
+    sf.write(buffer, samples, rate, format="WAV", subtype="PCM_16")
+    return buffer.getvalue()

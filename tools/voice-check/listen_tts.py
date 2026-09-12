@@ -75,13 +75,35 @@ def main() -> int:
     args = parser.parse_args()
 
     generated = json.loads(args.generation_report.read_text(encoding="utf-8"))
+    current_provider = generated.get("provider", "unknown")
+    current_voice = generated.get("voice", "unknown")
+
     previous = {}
+    stale_ids: set[str] = set()
     if args.out.exists():
         previous_doc = json.loads(args.out.read_text(encoding="utf-8"))
-        previous = {row["id"]: row for row in previous_doc.get("results", [])}
+        prior_provider = previous_doc.get("provider")
+        prior_voice = previous_doc.get("voice")
+        if prior_provider and (prior_provider, prior_voice) != (current_provider, current_voice):
+            print(
+                f"提示：已保存的评分来自 {prior_provider}/{prior_voice}，"
+                f"而当前音频是 {current_provider}/{current_voice}——语音变了，旧评分作废。"
+            )
+        for row in previous_doc.get("results", []):
+            # A score only carries over if it was made against the same audio.
+            if row.get("provider") and (row["provider"], row.get("voice")) != (
+                current_provider,
+                current_voice,
+            ):
+                stale_ids.add(row["id"])
+                continue
+            previous[row["id"]] = row
 
     output = audio_utils.select_playback_target(args.output_contains)
     print(f"Output: {output.describe()}")
+    print(f"音频来源: {current_provider} / {current_voice}")
+    if stale_ids:
+        print(f"需重评 {len(stale_ids)} 条（音频已更换）: {', '.join(sorted(stale_ids))}")
     print("评分：y=清晰可懂；n=不通过；r=重播；q=保存退出")
 
     results = []
@@ -104,18 +126,36 @@ def main() -> int:
             if answer == "q":
                 break
             if answer in {"y", "n"}:
-                results.append({"id": case["id"], "text": case["text"], "wav": str(wav), "passed": answer == "y"})
+                results.append(
+                    {
+                        "id": case["id"],
+                        "text": case["text"],
+                        "wav": str(wav),
+                        "provider": current_provider,
+                        "voice": current_voice,
+                        "passed": answer == "y",
+                    }
+                )
                 break
         if answer == "q":
             break
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps({"results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
+        args.out.write_text(
+            json.dumps(
+                {"provider": current_provider, "voice": current_voice, "results": results},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
     passed_count = sum(1 for row in results if row["passed"])
     complete = len(results) == generated["cases"]
     gate_passed = listening_gate(results, generated["cases"], args.min_passed)
     summary = {
         "tool": "listen_tts.py",
+        "provider": current_provider,
+        "voice": current_voice,
         "required": generated["cases"],
         "min_passed": args.min_passed,
         "reviewed": len(results),

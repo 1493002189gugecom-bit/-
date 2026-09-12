@@ -89,6 +89,21 @@ class TtsEngine:
         return _edge_synthesize(text, self.voice)
 
 
+def _decode_edge_audio(payload: bytes) -> tuple[np.ndarray, int]:
+    """Decode Edge MP3 bytes into mono float32 samples."""
+    import io
+
+    import soundfile as sf
+
+    samples, rate = sf.read(io.BytesIO(payload), dtype="float32", always_2d=False)
+    samples = np.asarray(samples, dtype=np.float32)
+    if samples.ndim > 1:
+        samples = samples.mean(axis=1)
+    if len(samples) == 0:
+        raise RuntimeError("edge-tts audio decoded to zero samples")
+    return samples, int(rate)
+
+
 def _edge_synthesize(text: str, voice: str) -> tuple[np.ndarray, int]:
     """Fetch MP3 audio from the Edge read-aloud service and decode it.
 
@@ -96,11 +111,9 @@ def _edge_synthesize(text: str, voice: str) -> tuple[np.ndarray, int]:
     because the service occasionally stalls instead of erroring.
     """
     import asyncio
-    import io
     import time
 
     import edge_tts
-    import soundfile as sf
 
     async def fetch() -> bytes:
         communicate = edge_tts.Communicate(
@@ -117,15 +130,24 @@ def _edge_synthesize(text: str, voice: str) -> tuple[np.ndarray, int]:
         return bytes(payload)
 
     def run_fetch() -> bytes:
+        """Run the fetch without swallowing genuine network errors.
+
+        A bare ``except RuntimeError`` around ``asyncio.run`` would also catch
+        errors raised *inside* the coroutine and trigger the nested-loop
+        fallback, doubling the number of requests per retry. The event-loop
+        situation is therefore detected explicitly.
+        """
         try:
-            return asyncio.run(fetch())
+            asyncio.get_running_loop()
         except RuntimeError:
-            # Already inside an event loop: run the coroutine on a private loop.
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(fetch())
-            finally:
-                loop.close()
+            # Normal synchronous context.
+            return asyncio.run(fetch())
+        # Already inside an event loop: use a private one instead.
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(fetch())
+        finally:
+            loop.close()
 
     last_error: Exception | None = None
     for attempt in range(1, config.EDGE_MAX_ATTEMPTS + 1):
@@ -137,13 +159,7 @@ def _edge_synthesize(text: str, voice: str) -> tuple[np.ndarray, int]:
                 raise RuntimeError(f"edge-tts returned no audio for voice {voice!r}")
             if elapsed > config.EDGE_SLOW_SECONDS and attempt < config.EDGE_MAX_ATTEMPTS:
                 raise RuntimeError(f"edge-tts responded slowly ({elapsed:.1f}s); retrying")
-            samples, rate = sf.read(io.BytesIO(payload), dtype="float32", always_2d=False)
-            samples = np.asarray(samples, dtype=np.float32)
-            if samples.ndim > 1:
-                samples = samples.mean(axis=1)
-            if len(samples) == 0:
-                raise RuntimeError("edge-tts audio decoded to zero samples")
-            return samples, int(rate)
+            return _decode_edge_audio(payload)
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             if attempt < config.EDGE_MAX_ATTEMPTS:
