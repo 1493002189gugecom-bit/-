@@ -9,6 +9,26 @@
 /docs/superpowers/*
 !/docs/superpowers/specs/
 !/docs/superpowers/plans/
+!/docs/superpowers/notes/
+!/docs/superpowers/reports/
+
+# Project roots added for implementation (keep this list minimal and explicit).
+!/tools/
+/tools/*
+!/tools/voice-check/
+
+!/apps/
+/apps/*
+!/apps/voice-service/
+/apps/voice-service/*
+!/apps/voice-service/src/
+!/apps/voice-service/requirements.lock.txt
+
+!/apps/home-service/
+/apps/home-service/*
+!/apps/home-service/src/
+!/apps/home-service/tests/
+!/apps/home-service/requirements.lock.txt
 
 # Secrets and local configuration
 .env
