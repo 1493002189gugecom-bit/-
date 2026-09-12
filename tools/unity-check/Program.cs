@@ -32,7 +32,7 @@ internal static class UnityCheck
         DirectoryInfo dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir != null)
         {
-            string candidate = Path.Combine(dir.FullName, "apps", "unity-house", "Assets", "Tests", "snapshot.json");
+            string candidate = Path.Combine(dir.FullName, "apps", "unity-house-payload", "Assets", "Tests", "snapshot.json");
             if (File.Exists(candidate))
             {
                 return candidate;

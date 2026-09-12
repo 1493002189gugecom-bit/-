@@ -15,7 +15,7 @@
     <!-- The real Unity sources are compiled here unchanged. -->
     <Compile Include="UnityStubs.cs" />
     <Compile Include="Program.cs" />
-    <Compile Include="..\..\apps\unity-house\Assets\Scripts\StateParser.cs" />
+    <Compile Include="..\..\apps\unity-house-payload\Assets\Scripts\StateParser.cs" />
   </ItemGroup>
 
 </Project>
