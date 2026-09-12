@@ -14,16 +14,17 @@
 - 云端文本大模型负责意图理解与工具选择，本地服务检查并执行。
 - Unity 显示状态变化；使用单个电脑扬声器模拟不同房间播报，不代表物理分区播放。
 
-## 设计文档
+## 文档
 
-[第一版完整设计与验收标准](docs/superpowers/specs/2026-09-12-smart-home-voice-agent-design.md)
+- [第一版完整设计与验收标准](docs/superpowers/specs/2026-09-12-smart-home-voice-agent-design.md)
+- [分阶段实现计划](docs/superpowers/plans/2026-09-12-smart-home-voice-agent-implementation-plan.md)
 
 ## 后续步骤
 
-1. 制定分阶段实现计划。
-2. 核验模型许可证、Windows 兼容性，并验证本地语音和唤醒效果。
-3. 完成家庭状态、受限工具与 Unity 小屋闭环。
-4. 接入云端 Agent 与人物检测，进行语音、故障和资源并行测试。
+1. 审阅并确认实现计划。
+2. 阶段 A：核验模型许可证与 Windows 兼容性，验证本地 ASR、TTS、唤醒。
+3. 阶段 B、C：完成家庭状态、受限工具与 Unity 小屋闭环。
+4. 阶段 D、E：接入云端 Agent 与人物检测，进行故障与资源并行验收。
 
 ## 数据与仓库边界
 
