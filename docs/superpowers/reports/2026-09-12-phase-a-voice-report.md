@@ -13,8 +13,8 @@
 | Python | `.venv` Python 3.11.9 |
 | 运行时 | sherpa-onnx 1.13.8 / sherpa-onnx-core 1.13.8 |
 | 模型目录 | `D:\smart-home-models`（用户要求放 D 盘，可用 `SMART_HOME_MODELS_DIR` 覆盖） |
-| 麦克风 | 显式选择 `麦克风阵列 (Realtek(R) Audio)`；不使用默认的网易虚拟音频设备 |
-| 扬声器 | 显式选择 `扬声器 (Realtek(R) Audio)` |
+| 麦克风 | 按优先列表自动选择；当前插着耳机时选中 `耳机式麦克风 (HyperX Virtual Surround Sound)`，否则回退 `麦克风阵列 (Realtek(R) Audio)`；不使用默认的网易虚拟音频设备 |
+| 扬声器 | 按同一优先列表选择；当前为 `头戴式耳机 (HyperX Virtual Surround Sound)` |
 
 依赖完整版本见 `apps/voice-service/requirements.lock.txt`。`pip check` 输出 `No broken requirements found.`。
 
@@ -88,10 +88,12 @@
 
 ## 4. 麦克风诊断
 
-- Windows 麦克风隐私权限 HKCU/HKLM 均为 `Allow`。
-- Realtek MME、DirectSound 可按 16 kHz mono 打开；WASAPI 当前只接受原生 48 kHz，选择器因此自动回退到 DirectSound。
-- 3 秒实时环路正常，无队列溢出。
-- 一次无人配合的 1 秒自动录音电平接近静音并在 PCM16 量化后为全零；多接口原始 float32 测试有非零底噪。**这不能证明讲话录音正常，必须由用户朗读时复测。**
+- Windows 麦克风隐私权限 HKCU/HKLM 与“桌面应用”两级均为 `Allow`。
+- 插入耳机后 Windows 默认输入变为 HyperX，因此输入设备改为**有序优先列表**（`HyperX, Realtek`，可用 `SMART_HOME_INPUT_DEVICE` 覆盖），避免写死设备名。
+- 端点注册表实测：HyperX 耳机麦克风 `ACTIVE`、音量 84/100；板载麦克风阵列 `ACTIVE`、音量 76/100。软件侧没有静音或零音量。
+- 但两路麦克风在 6 秒录音窗口内都只有噪声底（HyperX 约 −91 dBFS、板载约 −97 dBFS），**峰值仅 −64 / −84 dBFS，没有任何语音能量**；MME、DirectSound、WDM-KS 三种接口和两个通道结果一致。
+- 结论：现象是“录制期间没有声音进入系统”，而不是采样率或设备选择错误。可能原因是耳机物理静音键、麦克风未插到底，或录制时未实际发声。需要用 `--check-level` 在正式录音前确认。
+- 正式录制入口：`record_cases.py --check-level`（静音会直接退出并报警）、`diagnose_mic.py`（逐设备 dBFS 与可回放 WAV）、`inspect_endpoints.py`（只读端点状态）。
 
 ## 5. 尚未完成的硬门槛
 

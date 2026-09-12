@@ -26,6 +26,46 @@ py -3.11 -m venv .venv
 The selected input must contain `Realtek`; the Windows default NetEase virtual
 input is intentionally not used.
 
+## Choose the input device
+
+Device names change when a headset is plugged in, so the input is an ordered
+preference list rather than a hard-coded name. The default order is
+`HyperX, Realtek`; the first candidate that opens as mono float32 at 16 kHz wins.
+If none of them work, the tool fails loudly instead of silently recording silence
+from a virtual device.
+
+Inspect what is available and what will actually be used:
+
+```powershell
+.\.venv\Scripts\python.exe tools/voice-check/record_cases.py --list-devices
+```
+
+Override the preference list for the current shell (comma-separated substrings):
+
+```powershell
+$env:SMART_HOME_INPUT_DEVICE  = "HyperX"        # record through the headset mic
+$env:SMART_HOME_OUTPUT_DEVICE = "HyperX"        # play the reply through the headset
+```
+
+Before recording a whole corpus, confirm the microphone actually picks up your
+voice. This measures one second and aborts if it looks silent:
+
+```powershell
+.\.venv\Scripts\python.exe tools/voice-check/record_cases.py --check-level --phrases tools/voice-check/cases/mic-smoke.txt
+```
+
+For a per-device comparison with dBFS readings and playable WAV files:
+
+```powershell
+.\.venv\Scripts\python.exe tools/voice-check/diagnose_mic.py --seconds 6 --candidates HyperX
+```
+
+Endpoint state and Windows volume levels can be read (never modified) with:
+
+```powershell
+.\.venv\Scripts\python.exe tools/voice-check/inspect_endpoints.py HyperX Realtek
+```
+
 ## Record the 30 ASR cases
 
 ```powershell

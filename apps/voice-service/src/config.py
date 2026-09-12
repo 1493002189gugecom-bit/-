@@ -38,11 +38,39 @@ KWS_LEXICON = "en.phone"
 
 VAD_MODEL = "silero_vad.onnx"
 
-# The default input device on this machine is a virtual device, so the physical
-# Realtek microphone is selected explicitly. Device names are matched as
-# substrings of the PortAudio name.
-DEFAULT_INPUT_DEVICE = "Realtek"
-DEFAULT_OUTPUT_DEVICE = "Realtek"
+# The Windows default input on this machine was a virtual NetEase device, so a
+# physical device is selected explicitly by name instead. Device names change
+# when headsets are plugged in, so this is an ordered preference list: the first
+# candidate that opens as mono float32 at the required rate wins. Override the
+# whole list with SMART_HOME_INPUT_DEVICE (comma-separated substrings).
+DEFAULT_INPUT_DEVICE_CANDIDATES = (
+    "HyperX",
+    "Realtek",
+)
+DEFAULT_OUTPUT_DEVICE_CANDIDATES = (
+    "HyperX",
+    "Realtek",
+)
+
+
+def input_device_candidates() -> list[str]:
+    """Return ordered name substrings used to pick the physical microphone."""
+    raw = os.environ.get("SMART_HOME_INPUT_DEVICE")
+    if raw:
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return list(DEFAULT_INPUT_DEVICE_CANDIDATES)
+
+
+def output_device_candidates() -> list[str]:
+    raw = os.environ.get("SMART_HOME_OUTPUT_DEVICE")
+    if raw:
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return list(DEFAULT_OUTPUT_DEVICE_CANDIDATES)
+
+
+# Kept for backwards compatibility with earlier scripts/README wording.
+DEFAULT_INPUT_DEVICE = DEFAULT_INPUT_DEVICE_CANDIDATES[0]
+DEFAULT_OUTPUT_DEVICE = DEFAULT_OUTPUT_DEVICE_CANDIDATES[0]
 
 WAKE_WORD_CANDIDATES = ("小屋小屋", "你好小屋")
 SAMPLE_RATE = 16000

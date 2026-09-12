@@ -31,6 +31,32 @@ import audio_utils  # noqa: E402
 import config  # noqa: E402
 
 
+def list_usable_inputs() -> int:
+    """Print input devices that can open as mono float32 at 16 kHz."""
+    import sounddevice as sd
+
+    hostapis = sd.query_hostapis()
+    print("可用输入设备（支持 16 kHz 单声道）：")
+    for index, device in enumerate(sd.query_devices()):
+        if int(device["max_input_channels"]) <= 0:
+            continue
+        try:
+            sd.check_input_settings(device=index, channels=1, samplerate=config.SAMPLE_RATE, dtype="float32")
+        except sd.PortAudioError:
+            continue
+        host = str(hostapis[int(device["hostapi"])]["name"])
+        print(f"  #{index:>2} [{host}] {device['name']}")
+    print()
+    print("当前优先列表（SMART_HOME_INPUT_DEVICE 可覆盖）：" + ", ".join(config.input_device_candidates()))
+    try:
+        chosen = audio_utils.select_input_device(None, config.SAMPLE_RATE)
+        print(f"实际将使用：#{chosen.index} {chosen.name} [{chosen.hostapi}]")
+    except RuntimeError as exc:
+        print(f"当前无法选定输入设备：{exc}")
+        return 2
+    return 0
+
+
 def load_tsv(path: Path) -> list[dict]:
     cases = []
     for lineno, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
@@ -75,20 +101,40 @@ def record(device_index: int, seconds: float) -> np.ndarray:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group(required=False)
     source.add_argument("--cases", type=Path, help="TSV: id, wav path, expected words")
     source.add_argument("--phrases", type=Path, help="one phrase per line")
     parser.add_argument("--out-dir", type=Path, default=Path("tools/voice-check/cases/audio"))
-    parser.add_argument("--device-contains", default=config.DEFAULT_INPUT_DEVICE)
+    parser.add_argument("--device-contains", default=None, help="name filter; default uses the configured preference list")
+    parser.add_argument("--list-devices", action="store_true", help="print usable inputs and exit")
     parser.add_argument("--seconds", type=float, default=4.0)
     parser.add_argument("--start", type=int, default=1, help="1-based first case")
     parser.add_argument("--force", action="store_true", help="overwrite existing WAV files")
     parser.add_argument("--auto", action="store_true", help="record consecutively without Enter prompts")
+    parser.add_argument("--check-level", action="store_true", help="measure one second and warn if the input looks silent")
     args = parser.parse_args()
+
+    if args.list_devices:
+        return list_usable_inputs()
+    if not args.cases and not args.phrases:
+        parser.error("one of --cases or --phrases is required")
 
     device = audio_utils.select_input_device(args.device_contains, config.SAMPLE_RATE)
     print(f"Input: #{device.index} {device.name} [{device.hostapi}]")
     print(f"Format: {config.SAMPLE_RATE} Hz, mono, PCM16; duration: {args.seconds:.1f}s")
+
+    if args.check_level:
+        print("测量 1 秒输入电平，请说话……")
+        probe = record(device.index, 1.0)
+        probe_peak = float(np.max(np.abs(probe))) if len(probe) else 0.0
+        print(f"电平峰值 {probe_peak:.4f}")
+        if probe_peak < 0.02:
+            print(
+                "警告：几乎没有声音。请检查耳机静音键、Windows 输入音量，"
+                "并确认选择的是你正在使用的麦克风；未解决前不要开始正式录制。",
+                file=sys.stderr,
+            )
+            return 3
 
     cases = load_tsv(args.cases) if args.cases else load_phrases(args.phrases, args.out_dir)
     cases = cases[max(0, args.start - 1):]
