@@ -54,6 +54,7 @@
 !/apps/unity-house/Assets/
 !/apps/unity-house/Packages/
 !/apps/unity-house/ProjectSettings/
+!/apps/unity-house/tests/
 !/apps/unity-house/.gitignore
 !/apps/unity-house/README.md
 # Re-assert generated-folder exclusions for this project.

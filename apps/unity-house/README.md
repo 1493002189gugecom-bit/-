@@ -45,9 +45,24 @@ press Play. The on-screen report states:
 - Unity version and API compatibility level
 - whether `/health` and `/snapshot` are reachable
 - how many rooms/devices/persons were parsed
-- whether WebSocket support is available in this build
+- whether a WebSocket type is available in this profile
 
 A screenshot of that report is the evidence for step 1.
+
+**c) Manifest validity check**
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest apps/unity-house/tests -q
+```
+
+This verifies that Unity 2022.3 requires those exact dependencies. It exists
+because a package name was once written from memory
+(`com.unity.modules.unitywebrequestwebsocket`) and Unity refused to open the
+project. The check compares the manifest against the modules and package cache
+of the installed editor, so an unresolvable name cannot be committed again.
+
+If Unity reports `Project has invalid dependencies`, run this check first — it
+names the offending entry.
 
 ## Scripts
 

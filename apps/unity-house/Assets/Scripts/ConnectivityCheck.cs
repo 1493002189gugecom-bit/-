@@ -109,18 +109,29 @@ namespace SmartHome
 
         private void CheckWebSocketAvailability()
         {
-            // UnityWebRequest-based WebSocket support ships with the
-            // websocket module. The type existing proves the module is present;
-            // the C stage uses HTTP polling, so this is an availability probe.
-            System.Type ws = System.Type.GetType(
-                "UnityEngine.Networking.WebSocket, UnityEngine.UnityWebRequestWebSocketModule");
-            if (ws != null)
+            // Unity 2022.3 has no separate websocket module: WebSocket support
+            // ships inside com.unity.modules.unitywebrequest. Probe the two
+            // mechanisms that can actually exist, and report honestly rather
+            // than asserting a capability that may be absent.
+            var probes = new[]
             {
-                _report.AppendLine("[OK]   WebSocket type available (" + ws.FullName + ")");
-                return;
+                "UnityEngine.Networking.WebSocket, UnityEngine.UnityWebRequestModule",
+                "System.Net.WebSockets.ClientWebSocket, System.Net.WebSockets.Client",
+                "System.Net.WebSockets.ClientWebSocket, netstandard",
+            };
+
+            foreach (string probe in probes)
+            {
+                System.Type found = System.Type.GetType(probe);
+                if (found != null)
+                {
+                    _report.AppendLine("[OK]   WebSocket available: " + found.FullName);
+                    return;
+                }
             }
 
-            _report.AppendLine("[WARN] WebSocket type not found; HTTP polling is still usable");
+            _report.AppendLine("[WARN] No WebSocket type resolved in this profile.");
+            _report.AppendLine("       Phase C uses HTTP polling only, so this does not block step 1.");
         }
 
         private static string ApiCompatibilityLabel()
