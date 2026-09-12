@@ -16,21 +16,50 @@
 !/tools/
 /tools/*
 !/tools/voice-check/
-# Recorded test audio stays local; only case lists (*.tsv) are tracked.
+# Recorded test audio stays local; the *.wav rule below also covers this.
 /tools/voice-check/cases/audio/
+/tools/voice-check/cases/noise-30min/
+/tools/voice-check/cases/self-trigger/
 
 !/apps/
 /apps/*
+
+# Voice service (Python) and the Unity house project.
 !/apps/voice-service/
 /apps/voice-service/*
 !/apps/voice-service/src/
+!/apps/voice-service/tests/
 !/apps/voice-service/requirements.lock.txt
+!/apps/voice-service/pyproject.toml
+!/apps/voice-service/README.md
+/apps/voice-service/.venv/
 
 !/apps/home-service/
 /apps/home-service/*
 !/apps/home-service/src/
 !/apps/home-service/tests/
+!/apps/home-service/config/
 !/apps/home-service/requirements.lock.txt
+!/apps/home-service/pyproject.toml
+!/apps/home-service/README.md
+
+# Unity house. Track the project only; generated folders stay local.
+!/apps/unity-house/
+/apps/unity-house/*
+!/apps/unity-house/Assets/
+!/apps/unity-house/Packages/
+!/apps/unity-house/ProjectSettings/
+!/apps/unity-house/.gitignore
+!/apps/unity-house/README.md
+# Re-assert generated-folder exclusions for this project.
+/apps/unity-house/Library/
+/apps/unity-house/Temp/
+/apps/unity-house/Obj/
+/apps/unity-house/Build/
+/apps/unity-house/Builds/
+/apps/unity-house/Logs/
+/apps/unity-house/UserSettings/
+/apps/unity-house/.vs/
 
 # Secrets and local configuration
 .env
