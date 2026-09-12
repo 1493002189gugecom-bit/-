@@ -81,6 +81,80 @@ WAKE_WORD_CANDIDATES = ("小屋小屋", "你好小屋")
 SAMPLE_RATE = 16000
 
 
+# Kokoro v1.1 Chinese voices: 45-48 female (zf_*), 49-52 male (zm_*).
+# Audition them with tools/voice-check/audition_voices.py, then set
+# SMART_HOME_TTS_SPEAKER to the chosen id.
+DEFAULT_TTS_SPEAKER_ID = 47
+DEFAULT_TTS_SPEED = 1.0
+
+
+def tts_speaker_id() -> int:
+    """Return the configured Kokoro speaker id."""
+    raw = os.environ.get("SMART_HOME_TTS_SPEAKER")
+    if raw and raw.strip().isdigit():
+        return int(raw.strip())
+    return DEFAULT_TTS_SPEAKER_ID
+
+
+def tts_speed() -> float:
+    """Return the configured speech rate."""
+    raw = os.environ.get("SMART_HOME_TTS_SPEED")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return DEFAULT_TTS_SPEED
+        if 0.5 <= value <= 2.0:
+            return value
+    return DEFAULT_TTS_SPEED
+
+
+# Text-to-speech. Edge neural voices are used for announcements because they are
+# far more natural than the local 82M Kokoro model. This requires network access:
+# when it fails the announcement is reported as failed rather than silently
+# substituted.
+TTS_PROVIDER = "edge"
+EDGE_VOICE = "zh-CN-XiaoxiaoNeural"
+EDGE_VOICE_CANDIDATES = (
+    "zh-CN-XiaoxiaoNeural",  # female, warm
+    "zh-CN-XiaoyiNeural",  # female, lively
+    "zh-CN-YunxiNeural",  # male, lively
+    "zh-CN-YunyangNeural",  # male, professional
+    "zh-CN-YunjianNeural",  # male, passionate
+)
+EDGE_RATE = "+0%"
+EDGE_VOLUME = "+0%"
+EDGE_PITCH = "+0Hz"
+EDGE_TIMEOUT_SECONDS = 30.0
+# Online synthesis needs retries: transient network hiccups otherwise surface as
+# announcement failures. A slow request is retried rather than accepted.
+EDGE_MAX_ATTEMPTS = 3
+EDGE_RETRY_DELAY_SECONDS = 1.5
+EDGE_SLOW_SECONDS = 6.0
+# Fallback sample rate used only if the returned MP3 reports no rate.
+TTS_FALLBACK_SAMPLE_RATE = 24000
+
+
+def tts_provider() -> str:
+    return os.environ.get("SMART_HOME_TTS_PROVIDER", TTS_PROVIDER).strip().lower()
+
+
+def edge_voice() -> str:
+    return os.environ.get("SMART_HOME_TTS_VOICE", EDGE_VOICE).strip()
+
+
+def edge_rate() -> str:
+    return os.environ.get("SMART_HOME_TTS_RATE", EDGE_RATE).strip()
+
+
+def edge_volume() -> str:
+    return os.environ.get("SMART_HOME_TTS_VOLUME", EDGE_VOLUME).strip()
+
+
+def edge_pitch() -> str:
+    return os.environ.get("SMART_HOME_TTS_PITCH", EDGE_PITCH).strip()
+
+
 def require(path: Path) -> Path:
     """Fail loudly with an actionable message when a model path is missing."""
     if not path.exists():

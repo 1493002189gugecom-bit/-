@@ -24,10 +24,21 @@
 | --- | --- | --- | --- |
 | KWS | sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20 | 模型初始化及官方样例推理成功 | 包内无 LICENSE；本机开发可用，对外分发前必须向上游确认 |
 | VAD | silero_vad.onnx | 语音→静音转换返回正常 | 独立 ONNX 无随附许可证文本；分发前确认 |
-| ASR | SenseVoiceSmall int8 2024-07-17 | 官方中/英/日/韩/粤五条样例推理成功 | 包内链接到 FunASR；当前上游 LICENSE 为 MIT |
-| TTS | Kokoro int8 multi-lang v1.1 | 20 条中文全部生成 | 包内 Apache-2.0 |
+| ASR | SenseVoiceSmall int8 2024-07-17 | 官方中/英/日/韩/粤五条样例推理成功；真实录音 30/30 | 包内链接到 FunASR；当前上游 LICENSE 为 MIT |
+| TTS（现用） | **Microsoft Edge 神经语音（edge-tts，在线）** | 20/20 生成成功，延迟 1.1–3.6 秒 | ⚠️ 非公开接口，条款未明确允许服务化调用；自用可，分发前须评估 |
+| TTS（可选） | Kokoro int8 multi-lang v1.1（本地） | 25 条生成成功 | 包内 Apache-2.0 |
 
-详细来源、文件大小与许可证证据见 `docs/superpowers/notes/2026-09-12-model-review.md`。D 盘模型目录（压缩包＋解压目录）约 801 MB。
+详细来源、文件大小与许可证证据见 `docs/superpowers/notes/2026-09-12-model-review.md`。D 盘模型目录（压缩包＋解压目录）约 905 MB。
+
+### 2.1 TTS 选型变更（2026-09-12）
+
+用户试听本地 Kokoro 后反馈“音色像旧年代、含底噪”。实测与决策：
+
+- 底噪测量：静音段中位 **−60.5 dBFS**、高频能量占比中位 −24.7 dB，属于“基本不可闻”边缘，**不是主要问题**；主要问题是 82M 模型的音色与韵律。
+- 官方 RTF 表显示 Kokoro 中英版 RTF 3.19（4 线程），是所列中文模型里最慢的之一（aishell3 仅 0.156）。
+- 改用 **edge-tts**：延迟从 3.4 秒降到 **1.1–3.6 秒**，音质明显更自然，无需本地模型。
+- **明确取舍**：播报改为依赖网络。合成失败时如实报 `failed`，**不做本地自动替换**，保持播报状态机诚实。用户明确不需要本地后备。
+- Kokoro 保留为可选后端（`--provider kokoro`）供离线实验，不作为后备路径。
 
 ## 3. 自动化验证结果
 

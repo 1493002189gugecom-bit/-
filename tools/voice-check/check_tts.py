@@ -1,8 +1,9 @@
 """Offline TTS check: synthesize home-announcement sentences to WAV files.
 
-Phase A6. Reads a TSV of cases (id, text), synthesizes each with Kokoro via
-sherpa-onnx on CPU, and writes WAV files for human listening. This script does
-not judge audio quality; the operator records pass/fail per case in the report.
+Phase A6. Reads a TSV of cases (id, text) and synthesizes each with the
+configured TTS provider (Edge neural voices by default) into WAV files for human
+listening. This script does not judge audio quality; the operator records
+pass/fail per case in the report.
 
 Usage:
     python check_tts.py --cases tools/voice-check/cases/tts-20.tsv \
@@ -16,9 +17,6 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
-import sherpa_onnx
-
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")
@@ -27,31 +25,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "apps" / "voice-service" / "src"))
 import config  # noqa: E402
-
-# Kokoro Chinese voice ids: 45-48 female (zf_*), 49-52 male (zm_*).
-DEFAULT_SPEAKER_ID = 47  # zf_xiaoxiao
-
-
-def build_tts(speaker_id: int) -> sherpa_onnx.OfflineTts:
-    paths = config.tts_paths()
-    tts_config = sherpa_onnx.OfflineTtsConfig(
-        model=sherpa_onnx.OfflineTtsModelConfig(
-            kokoro=sherpa_onnx.OfflineTtsKokoroModelConfig(
-                model=str(paths["model"]),
-                voices=str(paths["voices"]),
-                tokens=str(paths["tokens"]),
-                data_dir=str(paths["data_dir"]),
-                lexicon=paths["lexicon"],
-            ),
-            num_threads=2,
-            provider="cpu",
-            debug=False,
-        ),
-        max_num_sentences=1,
-    )
-    if not tts_config.validate():
-        raise RuntimeError("invalid TTS config; check model paths and lexicon")
-    return sherpa_onnx.OfflineTts(tts_config)
+import voice_models  # noqa: E402
 
 
 def load_cases(path: Path) -> list[dict]:
@@ -75,7 +49,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
-    parser.add_argument("--speaker-id", type=int, default=DEFAULT_SPEAKER_ID)
+    parser.add_argument("--provider", default=None, help="edge (default) or kokoro")
+    parser.add_argument("--voice", default=None, help="edge voice name, e.g. zh-CN-XiaoxiaoNeural")
     parser.add_argument("--report", type=Path, default=None, help="where to write JSON metadata")
     args = parser.parse_args()
 
@@ -85,25 +60,29 @@ def main() -> int:
         return 2
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"cases: {len(cases)}  speaker_id: {args.speaker_id}")
-    tts = build_tts(args.speaker_id)
-    print(f"tts sample_rate: {tts.sample_rate}")
-
-    import soundfile as sf
+    engine = voice_models.create_tts(args.provider, args.voice)
+    print(f"cases: {len(cases)}  provider: {engine.provider}  voice: {engine.voice}")
 
     results = []
     for case in cases:
-        t0 = time.perf_counter()
-        audio = tts.generate(case["text"], sid=args.speaker_id, speed=1.0)
-        elapsed = time.perf_counter() - t0
-        if audio is None or len(audio.samples) == 0:
-            print(f"[FAIL] {case['id']}: no audio generated")
-            results.append({**case, "wav": None, "seconds": round(elapsed, 3), "error": "no audio"})
-            continue
         out = args.out_dir / f"{case['id']}.wav"
-        samples = np.asarray(audio.samples, dtype=np.float32)
-        sf.write(str(out), samples, audio.sample_rate, subtype="PCM_16")
-        duration = len(samples) / audio.sample_rate
+        t0 = time.perf_counter()
+        try:
+            samples, rate = engine.render_to(case["text"], out)
+        except Exception as exc:  # noqa: BLE001
+            elapsed = time.perf_counter() - t0
+            print(f"[FAIL] {case['id']}: {type(exc).__name__}: {exc}")
+            results.append(
+                {
+                    **case,
+                    "wav": None,
+                    "seconds": round(elapsed, 3),
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        elapsed = time.perf_counter() - t0
+        duration = len(samples) / rate
         print(f"[OK  ] {case['id']} ({elapsed:.2f}s, {duration:.2f}s audio): {case['text']}")
         results.append(
             {
@@ -111,6 +90,7 @@ def main() -> int:
                 "wav": str(out),
                 "seconds": round(elapsed, 3),
                 "audio_seconds": round(duration, 3),
+                "sample_rate": rate,
                 "error": None,
             }
         )
@@ -122,11 +102,16 @@ def main() -> int:
         json.dumps(
             {
                 "tool": "check_tts.py",
-                "speaker_id": args.speaker_id,
+                "provider": engine.provider,
+                "voice": engine.voice,
                 "cases": len(cases),
                 "generated": generated_count,
                 "passed": generation_passed,
-                "note": "generation must succeed for every case; listening requires >=18/20 and is recorded separately",
+                "note": (
+                    "generation must succeed for every case; announcements are network-backed, "
+                    "so a failure is reported rather than substituted locally; "
+                    "listening requires >=18/20 and is recorded separately"
+                ),
                 "results": results,
             },
             ensure_ascii=False,

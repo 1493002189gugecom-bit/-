@@ -1,11 +1,18 @@
 # Voice Service — Phase A Local Validation
 
-CPU-only local voice stack using `sherpa-onnx`:
+Voice stack: local KWS (wake word), Silero VAD, SenseVoice int8 ASR, plus
+**network-backed Edge neural TTS for announcements**.
 
-- Open-vocabulary KWS (wake word)
-- Silero VAD
-- SenseVoiceSmall int8 ASR
-- Kokoro v1.1 int8 TTS
+Announcement synthesis uses Microsoft Edge neural voices (`edge-tts`) because
+they sound markedly more natural than the local 82M Kokoro model.
+
+**Consequence: announcements require network access.** There is deliberately no
+automatic local substitution — if synthesis fails, the announcement is reported
+as failed rather than silently replaced, which keeps the `queued → playing →
+played | failed` contract honest.
+
+The local Kokoro model remains available as an optional backend
+(`--provider kokoro`) for offline experiments, but it is not used as a fallback.
 
 Models are stored outside the repository. On this machine the default root is
 `D:\smart-home-models`; override it with `SMART_HOME_MODELS_DIR`.
@@ -16,6 +23,37 @@ Models are stored outside the repository. On this machine the default root is
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r apps/voice-service/requirements.lock.txt
 ```
+
+## Choose the TTS voice
+
+```powershell
+# Audition the bundled Chinese candidates (network required).
+.\.venv\Scripts\python.exe tools/voice-check/audition_voices.py
+
+# Compare providers side by side: kokoro (local) vs edge (online).
+.\.venv\Scripts\python.exe tools/voice-check/compare_tts.py --options kokoro,edge
+```
+
+Available Chinese Edge voices:
+
+| Voice | Character |
+| --- | --- |
+| `zh-CN-XiaoxiaoNeural` | female, warm (default) |
+| `zh-CN-XiaoyiNeural` | female, lively |
+| `zh-CN-YunxiNeural` | male, lively |
+| `zh-CN-YunyangNeural` | male, professional |
+| `zh-CN-YunjianNeural` | male, passionate |
+
+Override the voice or speech rate for the current shell:
+
+```powershell
+$env:SMART_HOME_TTS_VOICE = "zh-CN-YunyangNeural"
+$env:SMART_HOME_TTS_RATE  = "+10%"
+```
+
+Online synthesis retries transient failures and suspiciously slow responses
+(3 attempts by default) so a network hiccup does not silently drop an
+announcement.
 
 ## Verify devices and models without opening the microphone
 

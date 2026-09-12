@@ -29,32 +29,158 @@ def transcribe(recognizer: sherpa_onnx.OfflineRecognizer, samples: np.ndarray, s
     return stream.result.text.strip()
 
 
-def create_tts() -> sherpa_onnx.OfflineTts:
-    paths = config.tts_paths()
-    kokoro = sherpa_onnx.OfflineTtsKokoroModelConfig(
-        model=str(paths["model"]),
-        voices=str(paths["voices"]),
-        tokens=str(paths["tokens"]),
-        data_dir=str(paths["data_dir"]),
-        lexicon=paths["lexicon"],
-    )
-    model = sherpa_onnx.OfflineTtsModelConfig(
-        kokoro=kokoro,
-        num_threads=2,
-        provider="cpu",
-        debug=False,
-    )
-    tts_config = sherpa_onnx.OfflineTtsConfig(model=model, max_num_sentences=1)
-    if not tts_config.validate():
-        raise RuntimeError("invalid Kokoro TTS configuration")
-    return sherpa_onnx.OfflineTts(tts_config)
+class TtsEngine:
+    """Text-to-speech facade with fixed backends.
+
+    ``edge`` uses Microsoft Edge neural voices over the network and is the
+    default because it sounds far more natural than the local model. There is no
+    automatic local substitution: if the network call fails, the caller must
+    treat the announcement as failed.
+    """
+
+    def __init__(self, provider: str | None = None, voice: str | None = None) -> None:
+        self.provider = (provider or config.tts_provider()).lower()
+        self.voice = voice or config.edge_voice()
+        if self.provider not in ("edge", "kokoro"):
+            raise ValueError(f"unknown TTS provider: {self.provider!r}")
+        self._kokoro: sherpa_onnx.OfflineTts | None = None
+
+    # -- kokoro (local) ---------------------------------------------------
+    def _kokoro_engine(self) -> sherpa_onnx.OfflineTts:
+        if self._kokoro is None:
+            paths = config.tts_paths()
+            kokoro = sherpa_onnx.OfflineTtsKokoroModelConfig(
+                model=str(paths["model"]),
+                voices=str(paths["voices"]),
+                tokens=str(paths["tokens"]),
+                data_dir=str(paths["data_dir"]),
+                lexicon=paths["lexicon"],
+            )
+            model = sherpa_onnx.OfflineTtsModelConfig(
+                kokoro=kokoro,
+                num_threads=2,
+                provider="cpu",
+                debug=False,
+            )
+            tts_config = sherpa_onnx.OfflineTtsConfig(model=model, max_num_sentences=1)
+            if not tts_config.validate():
+                raise RuntimeError("invalid Kokoro TTS configuration")
+            self._kokoro = sherpa_onnx.OfflineTts(tts_config)
+        return self._kokoro
+
+    # -- playback helpers -------------------------------------------------
+    def render_to(self, text: str, wav: Path) -> tuple[np.ndarray, int]:
+        """Synthesize into a 16-bit WAV file and return the samples."""
+        import soundfile as sf
+
+        samples, rate = self.synthesize(text)
+        wav.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(wav), samples, rate, subtype="PCM_16")
+        return samples, rate
+
+    def synthesize(self, text: str) -> tuple[np.ndarray, int]:
+        """Return (mono float32 samples, sample rate) or raise on failure."""
+        if self.provider == "kokoro":
+            tts = self._kokoro_engine()
+            audio = tts.generate(text, sid=config.tts_speaker_id(), speed=config.tts_speed())
+            if audio is None or len(audio.samples) == 0:
+                raise RuntimeError("Kokoro generated no samples")
+            return np.asarray(audio.samples, dtype=np.float32), int(audio.sample_rate)
+        return _edge_synthesize(text, self.voice)
 
 
-def synthesize(tts: sherpa_onnx.OfflineTts, text: str, speaker_id: int = 47) -> tuple[np.ndarray, int]:
-    audio = tts.generate(text, sid=speaker_id, speed=1.0)
-    if audio is None or len(audio.samples) == 0:
-        raise RuntimeError("TTS generated no samples")
-    return np.asarray(audio.samples, dtype=np.float32), int(audio.sample_rate)
+def _edge_synthesize(text: str, voice: str) -> tuple[np.ndarray, int]:
+    """Fetch MP3 audio from the Edge read-aloud service and decode it.
+
+    Retries transient failures, and also retries a suspiciously slow response
+    because the service occasionally stalls instead of erroring.
+    """
+    import asyncio
+    import io
+    import time
+
+    import edge_tts
+    import soundfile as sf
+
+    async def fetch() -> bytes:
+        communicate = edge_tts.Communicate(
+            text,
+            voice,
+            rate=config.edge_rate(),
+            volume=config.edge_volume(),
+            pitch=config.edge_pitch(),
+        )
+        payload = bytearray()
+        async for chunk in communicate.stream():
+            if chunk.get("type") == "audio" and chunk.get("data"):
+                payload.extend(chunk["data"])
+        return bytes(payload)
+
+    def run_fetch() -> bytes:
+        try:
+            return asyncio.run(fetch())
+        except RuntimeError:
+            # Already inside an event loop: run the coroutine on a private loop.
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(fetch())
+            finally:
+                loop.close()
+
+    last_error: Exception | None = None
+    for attempt in range(1, config.EDGE_MAX_ATTEMPTS + 1):
+        try:
+            started = time.perf_counter()
+            payload = run_fetch()
+            elapsed = time.perf_counter() - started
+            if not payload:
+                raise RuntimeError(f"edge-tts returned no audio for voice {voice!r}")
+            if elapsed > config.EDGE_SLOW_SECONDS and attempt < config.EDGE_MAX_ATTEMPTS:
+                raise RuntimeError(f"edge-tts responded slowly ({elapsed:.1f}s); retrying")
+            samples, rate = sf.read(io.BytesIO(payload), dtype="float32", always_2d=False)
+            samples = np.asarray(samples, dtype=np.float32)
+            if samples.ndim > 1:
+                samples = samples.mean(axis=1)
+            if len(samples) == 0:
+                raise RuntimeError("edge-tts audio decoded to zero samples")
+            return samples, int(rate)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt < config.EDGE_MAX_ATTEMPTS:
+                time.sleep(config.EDGE_RETRY_DELAY_SECONDS)
+
+    raise RuntimeError(
+        f"edge-tts failed after {config.EDGE_MAX_ATTEMPTS} attempts: {last_error}"
+    ) from last_error
+
+
+def create_tts(provider: str | None = None, voice: str | None = None) -> TtsEngine:
+    return TtsEngine(provider=provider, voice=voice)
+
+
+def synthesize(
+    tts: TtsEngine,
+    text: str,
+    speaker_id: int | None = None,
+    speed: float | None = None,
+) -> tuple[np.ndarray, int]:
+    """Backwards-compatible wrapper around ``TtsEngine.synthesize``.
+
+    ``speaker_id``/``speed`` are accepted for the local Kokoro backend; the Edge
+    backend encodes speed in ``SMART_HOME_TTS_RATE`` instead.
+    """
+    if speaker_id is not None or speed is not None:
+        if tts.provider != "kokoro":
+            raise ValueError("speaker_id/speed only apply to the kokoro provider")
+        audio = tts._kokoro_engine().generate(
+            text,
+            sid=config.tts_speaker_id() if speaker_id is None else speaker_id,
+            speed=config.tts_speed() if speed is None else speed,
+        )
+        if audio is None or len(audio.samples) == 0:
+            raise RuntimeError("Kokoro generated no samples")
+        return np.asarray(audio.samples, dtype=np.float32), int(audio.sample_rate)
+    return tts.synthesize(text)
 
 
 def create_vad() -> sherpa_onnx.VadModel:
