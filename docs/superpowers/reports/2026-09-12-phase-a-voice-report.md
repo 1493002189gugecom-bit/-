@@ -95,25 +95,33 @@
 - 结论：现象是“录制期间没有声音进入系统”，而不是采样率或设备选择错误。可能原因是耳机物理静音键、麦克风未插到底，或录制时未实际发声。需要用 `--check-level` 在正式录音前确认。
 - 正式录制入口：`record_cases.py --check-level`（静音会直接退出并报警）、`diagnose_mic.py`（逐设备 dBFS 与可回放 WAV）、`inspect_endpoints.py`（只读端点状态）。
 
-## 5. 尚未完成的硬门槛
+## 5. 门槛状态
 
 | 门槛 | 当前 | 放行要求 |
 | --- | --- | --- |
-| ASR 真实录音 | 0/30 | 关键字段命中 ≥27/30 |
-| TTS 人工试听 | 0/20 已评分；20/20 已生成 | 20 条逐条试听并记录，清晰且关键读音正确 ≥18/20 |
-| 两个唤醒词真人测试 | 各 0/20 | 各 ≥18/20，最终选定一个 |
-| 30 分钟负例 | 未录制 | 误唤醒次数记录并报告 |
-| 播放自触发声学回环 | 未录制 | 指令文字/触发次数必须为 0 |
-| 20 秒连续会话真人操作 | 脚本与 3 秒流已验证 | 实际唤醒、连续说话、超时、退出、播放期间暂停识别均复现 |
+| ASR 真实录音 | **30/30 通过**（门槛 ≥27/30） | ✅ 已达标 |
+| 录音质量 | 30 条 peak 中位 0.208，29 条 ≥0.1，1 条 0.095 | ✅ 合格 |
+| 麦克风可用性 | 耳机麦克风 ACTIVE、音量 84/100，实测可录 | ✅ 已确认 |
+| TTS 人工试听 | 0/20 已评分；20/20 已生成 | 待用户：20 条逐条试听并记录，清晰且关键读音正确 ≥18/20 |
+| 两个唤醒词真人测试 | 各 0/20 | 待用户：各 ≥18/20，最终选定一个 |
+| 30 分钟负例 | 未录制 | 待用户：录满 ≥1800 秒，误唤醒次数记录并报告 |
+| 播放自触发声学回环 | 未录制 | 待用户：指令文字/触发次数必须为 0 |
+| 20 秒连续会话真人操作 | 脚本与 3 秒流已验证，播放后计时与播放抑制均有回归测试 | 待用户：实际唤醒、连续说话、超时、退出均复现 |
 
 ## 6. 用户执行入口
 
 ```powershell
-# 1) 录 30 条 ASR（每条按 Enter 后朗读屏幕文本）
-.\.venv\Scripts\python.exe tools/voice-check/record_cases.py --cases tools/voice-check/cases/asr-30.tsv --seconds 4
+# 0) 查看还有哪些语料没录
+.\.venv\Scripts\python.exe tools/voice-check/recording_status.py
+
+# 1) 录 30 条 ASR（--check-level 会先测电平，静音直接报警退出）
+.\.venv\Scripts\python.exe tools/voice-check/record_cases.py --cases tools/voice-check/cases/asr-30.tsv --seconds 4 --check-level
 
 # 2) 跑 ASR 门槛
 .\.venv\Scripts\python.exe tools/voice-check/check_asr.py --cases tools/voice-check/cases/asr-30.tsv --out docs/superpowers/reports/artifacts/asr-results.json
+
+# 2b) 核查录音电平与时长
+.\.venv\Scripts\python.exe tools/voice-check/check_recording_quality.py
 
 # 3) 试听并逐条评分 TTS
 .\.venv\Scripts\python.exe tools/voice-check/listen_tts.py
@@ -122,11 +130,11 @@
 .\.venv\Scripts\python.exe tools/voice-check/record_cases.py --phrases tools/voice-check/cases/wake-xiaowu-20.txt --out-dir tools/voice-check/cases/audio/wake/xiaowu-xiaowu --seconds 3
 .\.venv\Scripts\python.exe tools/voice-check/record_cases.py --phrases tools/voice-check/cases/wake-nihao-20.txt --out-dir tools/voice-check/cases/audio/wake/nihao-xiaowu --seconds 3
 
-# 5) 录制 30 分钟负例（本地分成 6 个 5 分钟 WAV）
-.\.venv\Scripts\python.exe tools/voice-check/capture_negative.py
+# 5) 录制 30 分钟负例（本地分成 6 个 5 分钟 WAV；--yes 跳过确认）
+.\.venv\Scripts\python.exe tools/voice-check/capture_negative.py --yes
 
 # 6) 播放固定回复并用物理麦克风做声学回录（会发出声音）
-.\.venv\Scripts\python.exe tools/voice-check/capture_self_trigger.py
+.\.venv\Scripts\python.exe tools/voice-check/capture_self_trigger.py --count 3
 
 # 7) 检查真人唤醒、负例时长/误唤醒、回录 KWS 与 ASR 禁止词
 .\.venv\Scripts\python.exe tools/voice-check/check_wake.py --positives 20 --negatives-dir tools/voice-check/cases/noise-30min --self-trigger-out tools/voice-check/cases/self-trigger --out docs/superpowers/reports/artifacts/wake-results.json
@@ -135,8 +143,18 @@
 .\.venv\Scripts\python.exe apps/voice-service/src/loop.py
 ```
 
+**ASR 结果（2026-09-12 实测）：30/30 通过**，门槛 27/30。
+
+- 单条识别耗时 0.11–0.22 秒；全部为 16 kHz 单声道 4 秒。
+- 录音电平：peak 中位 0.208、最大 0.709、最小 0.095。
+- 用例 `asr-06` 最初因“关掉”被写成只接受“关闭”而误判，已改为接受 `关闭|关掉` 两种同义说法后命中；这属于用例写法问题，不是识别错误。
+
 ## 7. 阶段结论
 
-**暂不通过 / 不进入阶段 B。**
+**仍不放行，但最大的一项门槛已经通过。**
 
-尚未放行的直接原因是设计规定的真人录音、听感、30 分钟负例、声学回环和三轮连续会话仍需用户在电脑前配合。对应采集、检查、日志和评分工具已经提供并通过自动单测，但只有完成实际采集后才能评价门槛。现有自动结果仅证明：四模型可在 CPU 上初始化和推理，内存约 0.8 GiB，ASR/TTS/KWS/VAD 基础管线、Realtek 设备选择和连续环骨架均已运行。
+- 已通过：真实中文语音 ASR **30/30**（门槛 27/30），录音电平合格，耳机麦克风确认可用。
+- 待用户完成：TTS 20 条试听评分、两个唤醒词各 20 次、30 分钟负例、声学回环、连续会话三轮。
+- 已完成的自动验证：四模型 CPU 初始化与推理（内存约 0.8 GiB）、ASR/TTS/KWS/VAD 管线、设备优先选择、连续环骨架与 27 项单元测试。
+
+三项待办中最需要时间的是 30 分钟负例；唤醒词测试要在安静环境下做，且两个候选都要录满 20 次才能比较。

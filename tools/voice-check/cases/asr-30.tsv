@@ -4,7 +4,7 @@ asr-02	tools/voice-check/cases/audio/asr-02.wav	卧室 灯 关闭	请关闭卧�
 asr-03	tools/voice-check/cases/audio/asr-03.wav	空调 二十六度|26度	把空调调到二十六度。
 asr-04	tools/voice-check/cases/audio/asr-04.wav	厨房 百分之五十|50%|50百分比	把厨房的灯调到百分之五十。
 asr-05	tools/voice-check/cases/audio/asr-05.wav	客厅 制冷	打开客厅空调的制冷模式。
-asr-06	tools/voice-check/cases/audio/asr-06.wav	卧室 空调 关闭	把卧室空调关掉。
+asr-06	tools/voice-check/cases/audio/asr-06.wav	卧室 空调 关闭|关掉	把卧室空调关掉。
 asr-07	tools/voice-check/cases/audio/asr-07.wav	爸爸 吃饭	叫爸爸来吃饭。
 asr-08	tools/voice-check/cases/audio/asr-08.wav	孩子 吃饭	通知孩子吃饭了。
 asr-09	tools/voice-check/cases/audio/asr-09.wav	爸爸 孩子 吃饭	叫爸爸和孩子吃饭。

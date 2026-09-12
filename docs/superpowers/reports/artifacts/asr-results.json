@@ -1,0 +1,533 @@
+{
+  "tool": "check_asr.py",
+  "cases": 30,
+  "hits": 30,
+  "min_hits": 27,
+  "threshold_basis": "30 cases, >= 27 key-information hits",
+  "passed": true,
+  "total_seconds": 3.67,
+  "results": [
+    {
+      "id": "asr-01",
+      "wav": "tools/voice-check/cases/audio/asr-01.wav",
+      "expected": [
+        "客厅",
+        "灯",
+        "打开"
+      ],
+      "transcript": "把客厅的灯打开。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "客厅": "客厅",
+        "灯": "灯",
+        "打开": "打开"
+      },
+      "missing": [],
+      "seconds": 0.224
+    },
+    {
+      "id": "asr-02",
+      "wav": "tools/voice-check/cases/audio/asr-02.wav",
+      "expected": [
+        "卧室",
+        "灯",
+        "关闭"
+      ],
+      "transcript": "请关闭卧室的灯。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "卧室": "卧室",
+        "灯": "灯",
+        "关闭": "关闭"
+      },
+      "missing": [],
+      "seconds": 0.124
+    },
+    {
+      "id": "asr-03",
+      "wav": "tools/voice-check/cases/audio/asr-03.wav",
+      "expected": [
+        "空调",
+        "二十六度|26度"
+      ],
+      "transcript": "把空调调到26度。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "空调": "空调",
+        "二十六度|26度": "26度"
+      },
+      "missing": [],
+      "seconds": 0.123
+    },
+    {
+      "id": "asr-04",
+      "wav": "tools/voice-check/cases/audio/asr-04.wav",
+      "expected": [
+        "厨房",
+        "百分之五十|50%|50百分比"
+      ],
+      "transcript": "把厨房的灯调到50%。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "厨房": "厨房",
+        "百分之五十|50%|50百分比": "50%"
+      },
+      "missing": [],
+      "seconds": 0.122
+    },
+    {
+      "id": "asr-05",
+      "wav": "tools/voice-check/cases/audio/asr-05.wav",
+      "expected": [
+        "客厅",
+        "制冷"
+      ],
+      "transcript": "打开客厅空调的制冷模式。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "客厅": "客厅",
+        "制冷": "制冷"
+      },
+      "missing": [],
+      "seconds": 0.12
+    },
+    {
+      "id": "asr-06",
+      "wav": "tools/voice-check/cases/audio/asr-06.wav",
+      "expected": [
+        "卧室",
+        "空调",
+        "关闭|关掉"
+      ],
+      "transcript": "把卧室的空调关掉。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "卧室": "卧室",
+        "空调": "空调",
+        "关闭|关掉": "关掉"
+      },
+      "missing": [],
+      "seconds": 0.119
+    },
+    {
+      "id": "asr-07",
+      "wav": "tools/voice-check/cases/audio/asr-07.wav",
+      "expected": [
+        "爸爸",
+        "吃饭"
+      ],
+      "transcript": "叫爸爸来吃饭。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "爸爸": "爸爸",
+        "吃饭": "吃饭"
+      },
+      "missing": [],
+      "seconds": 0.116
+    },
+    {
+      "id": "asr-08",
+      "wav": "tools/voice-check/cases/audio/asr-08.wav",
+      "expected": [
+        "孩子",
+        "吃饭"
+      ],
+      "transcript": "通知孩子该吃饭了。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "孩子": "孩子",
+        "吃饭": "吃饭"
+      },
+      "missing": [],
+      "seconds": 0.117
+    },
+    {
+      "id": "asr-09",
+      "wav": "tools/voice-check/cases/audio/asr-09.wav",
+      "expected": [
+        "爸爸",
+        "孩子",
+        "吃饭"
+      ],
+      "transcript": "叫爸爸和孩子吃饭。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "爸爸": "爸爸",
+        "孩子": "孩子",
+        "吃饭": "吃饭"
+      },
+      "missing": [],
+      "seconds": 0.116
+    },
+    {
+      "id": "asr-10",
+      "wav": "tools/voice-check/cases/audio/asr-10.wav",
+      "expected": [
+        "妈妈",
+        "厨房"
+      ],
+      "transcript": "妈妈现在在厨房。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "妈妈": "妈妈",
+        "厨房": "厨房"
+      },
+      "missing": [],
+      "seconds": 0.117
+    },
+    {
+      "id": "asr-11",
+      "wav": "tools/voice-check/cases/audio/asr-11.wav",
+      "expected": [
+        "爸爸",
+        "卧室"
+      ],
+      "transcript": "爸爸在卧室。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "爸爸": "爸爸",
+        "卧室": "卧室"
+      },
+      "missing": [],
+      "seconds": 0.116
+    },
+    {
+      "id": "asr-12",
+      "wav": "tools/voice-check/cases/audio/asr-12.wav",
+      "expected": [
+        "孩子",
+        "客厅"
+      ],
+      "transcript": "孩子在客厅。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "孩子": "孩子",
+        "客厅": "客厅"
+      },
+      "missing": [],
+      "seconds": 0.122
+    },
+    {
+      "id": "asr-13",
+      "wav": "tools/voice-check/cases/audio/asr-13.wav",
+      "expected": [
+        "二十八度|28度",
+        "热"
+      ],
+      "transcript": "现在28度有点热。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "二十八度|28度": "28度",
+        "热": "热"
+      },
+      "missing": [],
+      "seconds": 0.123
+    },
+    {
+      "id": "asr-14",
+      "wav": "tools/voice-check/cases/audio/asr-14.wav",
+      "expected": [
+        "二十三度|23度",
+        "冷"
+      ],
+      "transcript": "室温23度，我觉得冷。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "二十三度|23度": "23度",
+        "冷": "冷"
+      },
+      "missing": [],
+      "seconds": 0.117
+    },
+    {
+      "id": "asr-15",
+      "wav": "tools/voice-check/cases/audio/asr-15.wav",
+      "expected": [
+        "不要",
+        "客厅",
+        "灯"
+      ],
+      "transcript": "不要打开客厅的灯。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "不要": "不要",
+        "客厅": "客厅",
+        "灯": "灯"
+      },
+      "missing": [],
+      "seconds": 0.12
+    },
+    {
+      "id": "asr-16",
+      "wav": "tools/voice-check/cases/audio/asr-16.wav",
+      "expected": [
+        "别",
+        "关闭",
+        "空调"
+      ],
+      "transcript": "先别关闭空调。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "别": "别",
+        "关闭": "关闭",
+        "空调": "空调"
+      },
+      "missing": [],
+      "seconds": 0.119
+    },
+    {
+      "id": "asr-17",
+      "wav": "tools/voice-check/cases/audio/asr-17.wav",
+      "expected": [
+        "客厅",
+        "还是",
+        "卧室"
+      ],
+      "transcript": "你说的是客厅还是卧室？",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "客厅": "客厅",
+        "还是": "还是",
+        "卧室": "卧室"
+      },
+      "missing": [],
+      "seconds": 0.121
+    },
+    {
+      "id": "asr-18",
+      "wav": "tools/voice-check/cases/audio/asr-18.wav",
+      "expected": [
+        "亮",
+        "一点"
+      ],
+      "transcript": "这里太暗了，亮一点。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "亮": "亮",
+        "一点": "一点"
+      },
+      "missing": [],
+      "seconds": 0.118
+    },
+    {
+      "id": "asr-19",
+      "wav": "tools/voice-check/cases/audio/asr-19.wav",
+      "expected": [
+        "凉快",
+        "一点"
+      ],
+      "transcript": "房间有点热，凉快一点。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "凉快": "凉快",
+        "一点": "一点"
+      },
+      "missing": [],
+      "seconds": 0.118
+    },
+    {
+      "id": "asr-20",
+      "wav": "tools/voice-check/cases/audio/asr-20.wav",
+      "expected": [
+        "刚才",
+        "温度",
+        "一度|1度"
+      ],
+      "transcript": "刚才那个温度再低一度。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "刚才": "刚才",
+        "温度": "温度",
+        "一度|1度": "一度"
+      },
+      "missing": [],
+      "seconds": 0.117
+    },
+    {
+      "id": "asr-21",
+      "wav": "tools/voice-check/cases/audio/asr-21.wav",
+      "expected": [
+        "它",
+        "关闭"
+      ],
+      "transcript": "把它关闭。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "它": "它",
+        "关闭": "关闭"
+      },
+      "missing": [],
+      "seconds": 0.116
+    },
+    {
+      "id": "asr-22",
+      "wav": "tools/voice-check/cases/audio/asr-22.wav",
+      "expected": [
+        "所有",
+        "灯"
+      ],
+      "transcript": "关闭所有的灯。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "所有": "所有",
+        "灯": "灯"
+      },
+      "missing": [],
+      "seconds": 0.116
+    },
+    {
+      "id": "asr-23",
+      "wav": "tools/voice-check/cases/audio/asr-23.wav",
+      "expected": [
+        "客厅",
+        "卧室",
+        "空调"
+      ],
+      "transcript": "把客厅和卧室的空调都打开。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "客厅": "客厅",
+        "卧室": "卧室",
+        "空调": "空调"
+      },
+      "missing": [],
+      "seconds": 0.119
+    },
+    {
+      "id": "asr-24",
+      "wav": "tools/voice-check/cases/audio/asr-24.wav",
+      "expected": [
+        "百分之三十|30%|30百分比"
+      ],
+      "transcript": "把灯调到30%。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "百分之三十|30%|30百分比": "30%"
+      },
+      "missing": [],
+      "seconds": 0.116
+    },
+    {
+      "id": "asr-25",
+      "wav": "tools/voice-check/cases/audio/asr-25.wav",
+      "expected": [
+        "二十五点五度|25.5度"
+      ],
+      "transcript": "空调设成25.5度。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "二十五点五度|25.5度": "25.5度"
+      },
+      "missing": [],
+      "seconds": 0.116
+    },
+    {
+      "id": "asr-26",
+      "wav": "tools/voice-check/cases/audio/asr-26.wav",
+      "expected": [
+        "下午五点|下午5点"
+      ],
+      "transcript": "下午5点提醒我做饭。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "下午五点|下午5点": "下午5点"
+      },
+      "missing": [],
+      "seconds": 0.116
+    },
+    {
+      "id": "asr-27",
+      "wav": "tools/voice-check/cases/audio/asr-27.wav",
+      "expected": [
+        "小朋友",
+        "起床"
+      ],
+      "transcript": "小朋友该起床了。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "小朋友": "小朋友",
+        "起床": "起床"
+      },
+      "missing": [],
+      "seconds": 0.117
+    },
+    {
+      "id": "asr-28",
+      "wav": "tools/voice-check/cases/audio/asr-28.wav",
+      "expected": [
+        "位置",
+        "不知道"
+      ],
+      "transcript": "我不知道爸爸的位置。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "位置": "位置",
+        "不知道": "不知道"
+      },
+      "missing": [],
+      "seconds": 0.122
+    },
+    {
+      "id": "asr-29",
+      "wav": "tools/voice-check/cases/audio/asr-29.wav",
+      "expected": [
+        "全屋",
+        "播报"
+      ],
+      "transcript": "需要全屋播报吗？",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "全屋": "全屋",
+        "播报": "播报"
+      },
+      "missing": [],
+      "seconds": 0.117
+    },
+    {
+      "id": "asr-30",
+      "wav": "tools/voice-check/cases/audio/asr-30.wav",
+      "expected": [
+        "退出",
+        "对话"
+      ],
+      "transcript": "退出连续对话。",
+      "error": null,
+      "hit": true,
+      "matched_alternatives": {
+        "退出": "退出",
+        "对话": "对话"
+      },
+      "missing": [],
+      "seconds": 0.115
+    }
+  ]
+}
