@@ -1,0 +1,52 @@
+# Initial repository allowlist: this workspace also contains unrelated projects.
+# Explicitly allow new application roots here when implementation begins.
+/*
+!/.gitignore
+!/README.md
+!/docs/
+/docs/*
+!/docs/superpowers/
+/docs/superpowers/*
+!/docs/superpowers/specs/
+!/docs/superpowers/plans/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+credentials.json
+secrets.json
+
+# Dependencies, Python state and model artifacts
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+models/
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*.gguf
+
+# Local diagnostics and recordings
+*.log
+recordings/
+.superpowers/
+
+# Unity generated content (do not ignore Assets, Packages, ProjectSettings or .meta)
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+.vs/
