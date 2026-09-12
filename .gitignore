@@ -16,6 +16,8 @@
 !/tools/
 /tools/*
 !/tools/voice-check/
+# Recorded test audio stays local; only case lists (*.tsv) are tracked.
+/tools/voice-check/cases/audio/
 
 !/apps/
 /apps/*
