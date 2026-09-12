@@ -26,18 +26,25 @@ py -3.11 -m venv .venv
 The selected input must contain `Realtek`; the Windows default NetEase virtual
 input is intentionally not used.
 
-## Choose the input device
+## Choose the input and output devices
 
-Device names change when a headset is plugged in, so the input is an ordered
-preference list rather than a hard-coded name. The default order is
+Device names change when a headset is plugged in, so devices are chosen from an
+ordered preference list rather than a hard-coded name. The default order is
 `HyperX, Realtek`; the first candidate that opens as mono float32 at 16 kHz wins.
 If none of them work, the tool fails loudly instead of silently recording silence
 from a virtual device.
+
+Playback uses a stricter check: `select_playback_target()` also verifies the
+sample rate and channel count, preferring **WASAPI** over the legacy
+DirectSound/MME paths. That matters because a DirectSound endpoint can accept
+`stream.write()` and still produce no audible output — which is exactly what
+happened on this machine.
 
 Inspect what is available and what will actually be used:
 
 ```powershell
 .\.venv\Scripts\python.exe tools/voice-check/record_cases.py --list-devices
+.\.venv\Scripts\python.exe tools/voice-check/test_target_playback.py
 ```
 
 Override the preference list for the current shell (comma-separated substrings):
@@ -45,6 +52,14 @@ Override the preference list for the current shell (comma-separated substrings):
 ```powershell
 $env:SMART_HOME_INPUT_DEVICE  = "HyperX"        # record through the headset mic
 $env:SMART_HOME_OUTPUT_DEVICE = "HyperX"        # play the reply through the headset
+```
+
+If audio still cannot be heard, compare the Windows-native player against
+PortAudio, then measure the system output meter:
+
+```powershell
+.\.venv\Scripts\python.exe tools/voice-check/test_windows_audio.py
+.\.venv\Scripts\python.exe tools/voice-check/test_output_meter.py
 ```
 
 Before recording a whole corpus, confirm the microphone actually picks up your

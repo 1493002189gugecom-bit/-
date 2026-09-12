@@ -38,6 +38,11 @@ KWS_LEXICON = "en.phone"
 
 VAD_MODEL = "silero_vad.onnx"
 
+# Playback sample rate for generated speech (Kokoro emits 24 kHz).
+TTS_SAMPLE_RATE = 24000
+# Virtual surround endpoints often expose only 48 kHz; resample when needed.
+OUTPUT_FALLBACK_SAMPLE_RATE = 48000
+
 # The Windows default input on this machine was a virtual NetEase device, so a
 # physical device is selected explicitly by name instead. Device names change
 # when headsets are plugged in, so this is an ordered preference list: the first

@@ -35,6 +35,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 import audio_utils
 import config
+import playback
 import voice_models
 
 BLOCK_SIZE = 512
@@ -82,19 +83,22 @@ def drain(q: queue.Queue) -> None:
 def play(
     samples: np.ndarray,
     sample_rate: int,
-    output_device: int,
+    target: audio_utils.PlaybackTarget,
     on_stream_started: Callable[[float], None] | None = None,
 ) -> None:
+    """Play through the verified target, reporting stream latency once."""
+    audio = playback.resample(samples, sample_rate, target.sample_rate)
+    frames = playback.to_channels(audio, target.channels)
     with sd.OutputStream(
-        samplerate=sample_rate,
-        channels=1,
+        samplerate=target.sample_rate,
+        channels=target.channels,
         dtype="float32",
-        device=output_device,
-        blocksize=0,
+        device=target.index,
     ) as stream:
         if on_stream_started is not None:
             on_stream_started(float(stream.latency))
-        stream.write(np.asarray(samples, dtype=np.float32).reshape(-1, 1))
+        stream.write(frames)
+        time.sleep(0.35)
 
 
 def wake_tone(sample_rate: int = 24000) -> np.ndarray:
@@ -121,10 +125,10 @@ def main() -> int:
     args = parser.parse_args()
 
     input_device = audio_utils.select_input_device(args.input_contains, config.SAMPLE_RATE)
-    output_device = None if args.no_tts else audio_utils.select_output_device(args.output_contains, 24000)
+    output_target = None if args.no_tts else audio_utils.select_playback_target(args.output_contains)
     print(f"input : #{input_device.index} {input_device.name} [{input_device.hostapi}]")
-    if output_device:
-        print(f"output: #{output_device.index} {output_device.name} [{output_device.hostapi}]")
+    if output_target:
+        print(f"output: {output_target.describe()}")
     print(f"model root: {config.models_dir()}")
     print("loading KWS/VAD/ASR" + (" ..." if args.no_tts else "/TTS ..."))
 
@@ -174,7 +178,7 @@ def main() -> int:
         "ready",
         state=state,
         input_device=input_device.name,
-        output_device=output_device.name if output_device else None,
+        output_device=output_target.describe() if output_target else None,
         idle_timeout_seconds=args.idle_timeout,
     )
     run_deadline = time.monotonic() + args.run_seconds if args.run_seconds > 0 else None
@@ -219,8 +223,8 @@ def main() -> int:
                             kws.reset_stream(kws_stream)
                             accept_input = False
                             drain(audio_queue)
-                            if output_device is not None:
-                                play(wake_tone(), 24000, output_device.index)
+                            if output_target is not None:
+                                play(wake_tone(), 24000, output_target)
                             drain(audio_queue)
                             accept_input = True
                             state = "active"
@@ -289,7 +293,7 @@ def main() -> int:
                                         estimated=True,
                                     )
 
-                                play(reply, sr, output_device.index, record_first_output)
+                                play(reply, sr, output_target, record_first_output)
                                 print("[tts] 播放结束，恢复识别")
                                 log_event("tts_end", state=state, text="收到。")
 

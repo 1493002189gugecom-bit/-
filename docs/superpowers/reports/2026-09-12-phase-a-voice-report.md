@@ -93,7 +93,31 @@
 - 端点注册表实测：HyperX 耳机麦克风 `ACTIVE`、音量 84/100；板载麦克风阵列 `ACTIVE`、音量 76/100。软件侧没有静音或零音量。
 - 但两路麦克风在 6 秒录音窗口内都只有噪声底（HyperX 约 −91 dBFS、板载约 −97 dBFS），**峰值仅 −64 / −84 dBFS，没有任何语音能量**；MME、DirectSound、WDM-KS 三种接口和两个通道结果一致。
 - 结论：现象是“录制期间没有声音进入系统”，而不是采样率或设备选择错误。可能原因是耳机物理静音键、麦克风未插到底，或录制时未实际发声。需要用 `--check-level` 在正式录音前确认。
+- **后续已确认可用**：用户解除静音后，30 条 ASR 录音 peak 中位 0.208，输入路径正常。
 - 正式录制入口：`record_cases.py --check-level`（静音会直接退出并报警）、`diagnose_mic.py`（逐设备 dBFS 与可回放 WAV）、`inspect_endpoints.py`（只读端点状态）。
+
+## 4b. 播放路径缺陷与修复（TTS 试听无声）
+
+首次运行 `listen_tts.py` 时用户报告完全听不到声音，排查过程与结论：
+
+| 检查 | 结果 |
+| --- | --- |
+| Python 目标设备 | `#18 头戴式耳机 (HyperX)` [DirectSound] |
+| 与 Windows 默认端点是否同一 | 是（端点 ID `{18976a29-…}`） |
+| 端点状态 / 音量 | ACTIVE / 253（满） |
+| `stream.write()` | 5 条 PortAudio 路径全部“成功”且无异常 |
+| Windows 输出电平表 | **0.0000** |
+| 三路对照（winsound 提示音 / winsound WAV / sounddevice） | 用户反馈：**只有 sounddevice 没声音** |
+
+**根因**：DirectSound 主机接口能接受写入却不产生可听输出，而 Windows 原生播放（WASAPI）正常。
+
+**修复**：
+1. 新增 `audio_utils.select_playback_target()`，返回经校验的设备＋采样率＋声道组合，主机接口优先级改为 **WASAPI > DirectSound > MME > WDM-KS**，并在单声道不被支持时回退立体声、在 24 kHz 不被支持时回退 48 kHz。
+2. 新增 `apps/voice-service/src/playback.py`：按目标重采样、必要时复制为多声道，写入后等待缓冲排空。
+3. `loop.py`、`listen_tts.py`、`capture_self_trigger.py` 全部改用该目标；`listen_tts.py` 保留 `--player winsound` 原生回退。
+4. 修复后实测目标为 `#24 头戴式耳机 (HyperX) [Windows WASAPI] 48000 Hz x2`，用户确认**能听到测试音**。
+
+WDM-KS 仍排在最后：PortAudio 对它报 `Blocking API not supported yet`，不适合作为采集主路径。
 
 ## 5. 门槛状态
 
@@ -101,7 +125,8 @@
 | --- | --- | --- |
 | ASR 真实录音 | **30/30 通过**（门槛 ≥27/30） | ✅ 已达标 |
 | 录音质量 | 30 条 peak 中位 0.208，29 条 ≥0.1，1 条 0.095 | ✅ 合格 |
-| 麦克风可用性 | 耳机麦克风 ACTIVE、音量 84/100，实测可录 | ✅ 已确认 |
+| 麦克风可用性 | 耳机麦克风 ACTIVE、音量 84/100，实测可录（30 条 peak 中位 0.208） | ✅ 已确认 |
+| 播放路径可用性 | WASAPI 48 kHz 立体声，用户确认可听到测试音 | ✅ 已修复并确认 |
 | TTS 人工试听 | 0/20 已评分；20/20 已生成 | 待用户：20 条逐条试听并记录，清晰且关键读音正确 ≥18/20 |
 | 两个唤醒词真人测试 | 各 0/20 | 待用户：各 ≥18/20，最终选定一个 |
 | 30 分钟负例 | 未录制 | 待用户：录满 ≥1800 秒，误唤醒次数记录并报告 |

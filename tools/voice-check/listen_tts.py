@@ -25,21 +25,14 @@ for _stream in (sys.stdout, sys.stderr):
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "apps" / "voice-service" / "src"))
 import audio_utils  # noqa: E402
 import config  # noqa: E402
+import playback  # noqa: E402
 
 
-def play(wav: Path, device_index: int) -> None:
+def play(wav: Path, target: audio_utils.PlaybackTarget) -> None:
     samples, sample_rate = sf.read(str(wav), dtype="float32", always_2d=False)
     if samples.ndim > 1:
         samples = samples.mean(axis=1)
-    with sd.OutputStream(
-        samplerate=sample_rate,
-        channels=1,
-        dtype="float32",
-        device=device_index,
-    ) as stream:
-        stream.write(np.asarray(samples, dtype=np.float32).reshape(-1, 1))
-        # Let buffered audio drain before the stream closes.
-        time.sleep(0.3)
+    playback.play(np.asarray(samples, dtype=np.float32), sample_rate, target)
 
 
 def play_native(wav: Path) -> None:
@@ -49,11 +42,11 @@ def play_native(wav: Path) -> None:
     winsound.PlaySound(str(wav), winsound.SND_FILENAME)
 
 
-def play_with_fallback(wav: Path, device_index: int, mode: str) -> str:
+def play_with_fallback(wav: Path, target: audio_utils.PlaybackTarget, mode: str) -> str:
     """Play a WAV, returning the player that was actually used."""
     if mode in ("auto", "portaudio"):
         try:
-            play(wav, device_index)
+            play(wav, target)
             return "portaudio"
         except Exception as exc:  # noqa: BLE001
             print(f"    PortAudio 播放失败: {type(exc).__name__}: {exc}")
@@ -87,8 +80,8 @@ def main() -> int:
         previous_doc = json.loads(args.out.read_text(encoding="utf-8"))
         previous = {row["id"]: row for row in previous_doc.get("results", [])}
 
-    output = audio_utils.select_output_device(args.output_contains, 24000)
-    print(f"Output: #{output.index} {output.name} [{output.hostapi}]")
+    output = audio_utils.select_playback_target(args.output_contains)
+    print(f"Output: {output.describe()}")
     print("评分：y=清晰可懂；n=不通过；r=重播；q=保存退出")
 
     results = []
@@ -101,7 +94,7 @@ def main() -> int:
         wav = Path(case["wav"])
         while True:
             print(f"\n{case['id']}: {case['text']}")
-            used = play_with_fallback(wav, output.index, args.player)
+            used = play_with_fallback(wav, output, args.player)
             if used == "winsound" and not warned_native:
                 print("    注意：PortAudio 不可用，已改用 Windows 原生播放（走系统默认输出设备）。")
                 warned_native = True

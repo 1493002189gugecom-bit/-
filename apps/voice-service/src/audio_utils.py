@@ -22,6 +22,37 @@ class AudioDevice:
     default_samplerate: float
 
 
+@dataclass(frozen=True)
+class PlaybackTarget:
+    """A concrete, verified way to play audio on one device."""
+
+    device: AudioDevice
+    sample_rate: int
+    channels: int
+
+    @property
+    def index(self) -> int:
+        return self.device.index
+
+    @property
+    def name(self) -> str:
+        return self.device.name
+
+    @property
+    def hostapi(self) -> str:
+        return self.device.hostapi
+
+    def describe(self) -> str:
+        return (
+            f"#{self.device.index} {self.device.name} [{self.device.hostapi}] "
+            f"{self.sample_rate} Hz x{self.channels}"
+        )
+
+
+# WASAPI is the modern path straight to the hardware endpoint and is preferred
+# for playback. Legacy MME and DirectSound are ordered next for input, where
+# WDM-KS is avoided: PortAudio reports "Blocking API not supported yet" for
+# WDM-KS streams, which is fragile for the capture loop.
 _HOST_PRIORITY = {
     "Windows WASAPI": 0,
     "Windows DirectSound": 1,
@@ -112,6 +143,59 @@ def _select(
         f"No usable {kind} for {patterns!r} at {sample_rate} Hz.\n"
         f"Candidate errors:\n{detail}\n\nAvailable {kind} devices:\n{available}\n\n"
         f"Set SMART_HOME_INPUT_DEVICE / SMART_HOME_OUTPUT_DEVICE to override the name list."
+    )
+
+
+def select_playback_target(
+    name_contains: str | None = None,
+    sample_rate: int = config.TTS_SAMPLE_RATE,
+    patterns: list[str] | None = None,
+) -> PlaybackTarget:
+    """Select an output device *and* a verified channel/rate combination.
+
+    Some virtual-surround endpoints reject mono or the 24 kHz speech rate on
+    WASAPI, so stereo and the device-native rate are tried as well. Returning the
+    working combination avoids the failure mode where a legacy host API accepts
+    writes but produces no audible output.
+    """
+    if patterns is None:
+        patterns = [name_contains] if name_contains else config.output_device_candidates()
+
+    devices = list_output_devices()
+    candidates = _match_candidates(devices, patterns)
+    errors: list[str] = []
+
+    for device in candidates:
+        attempts: list[tuple[int, int]] = [
+            (sample_rate, 1),
+            (sample_rate, 2),
+            (int(device.default_samplerate), 2),
+            (config.OUTPUT_FALLBACK_SAMPLE_RATE, 2),
+            (44100, 2),
+        ]
+        seen: set[tuple[int, int]] = set()
+        for rate, channels in attempts:
+            if rate <= 0 or (rate, channels) in seen:
+                continue
+            seen.add((rate, channels))
+            try:
+                sd.check_output_settings(
+                    device=device.index,
+                    channels=channels,
+                    samplerate=rate,
+                    dtype="float32",
+                )
+                return PlaybackTarget(device=device, sample_rate=rate, channels=channels)
+            except sd.PortAudioError as exc:
+                errors.append(
+                    f"{device.index} {device.name} ({device.hostapi}) {rate}Hz x{channels}: {exc}"
+                )
+
+    available = "\n".join(f"  {d.index}: {d.name} [{d.hostapi}]" for d in devices)
+    detail = "\n".join(errors) if errors else "no device matched the preferred names"
+    raise RuntimeError(
+        f"No usable playback target for {patterns!r}.\n"
+        f"Attempts:\n{detail}\n\nAvailable output devices:\n{available}"
     )
 
 

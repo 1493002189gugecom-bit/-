@@ -25,8 +25,8 @@ for _stream in (sys.stdout, sys.stderr):
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "apps" / "voice-service" / "src"))
 import audio_utils  # noqa: E402
 import config  # noqa: E402
+import playback  # noqa: E402
 import voice_models  # noqa: E402
-from loop import play  # noqa: E402
 
 
 def main() -> int:
@@ -43,9 +43,9 @@ def main() -> int:
     if args.count < 1:
         raise ValueError("--count must be >= 1")
     input_device = audio_utils.select_input_device(args.input_contains, config.SAMPLE_RATE)
-    output_device = audio_utils.select_output_device(args.output_contains, 24000)
+    output_target = audio_utils.select_playback_target(args.output_contains)
     print(f"Input : #{input_device.index} {input_device.name} [{input_device.hostapi}]")
-    print(f"Output: #{output_device.index} {output_device.name} [{output_device.hostapi}]")
+    print(f"Output: {output_target.describe()}")
     print(f"将正常音量播放 {args.count} 次：{args.text}")
     if not args.yes and input("按 Enter 继续，输入 q 取消：").strip().lower() == "q":
         return 2
@@ -71,7 +71,7 @@ def main() -> int:
             callback=callback,
         ):
             time.sleep(0.5)
-            play(reply, reply_sr, output_device.index)
+            playback.play(reply, reply_sr, output_target)
             time.sleep(1.0)
 
         collected: list[np.ndarray] = []
