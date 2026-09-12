@@ -99,6 +99,12 @@ models/
 recordings/
 .superpowers/
 
+# Acceptance result files are regenerated per run; only commit a real outcome
+# deliberately (git add -f) once a phase gate has actually been evaluated.
+docs/superpowers/reports/artifacts/asr-results.json
+docs/superpowers/reports/artifacts/wake-results.json
+docs/superpowers/reports/artifacts/tts-listening.json
+
 # Unity generated content (do not ignore Assets, Packages, ProjectSettings or .meta)
 [Ll]ibrary/
 [Tt]emp/

@@ -142,10 +142,20 @@ def main() -> int:
         print("no cases to record", file=sys.stderr)
         return 2
 
+    def resolve(wav: Path) -> Path:
+        return wav if wav.is_absolute() else Path.cwd() / wav
+
+    pending = [c for c in cases if not resolve(c["wav"]).exists()]
+    print()
+    print(f"待录 {len(pending)} 条，已存在 {len(cases) - len(pending)} 条")
+    if not pending:
+        print("全部已录制。若要重录，加 --force；若要续录，用 --start N。")
+        return 0
+    print("录音时请保持正常语速；输入 s 跳过当前，输入 q 退出。")
+    print()
+
     for position, case in enumerate(cases, args.start):
-        wav = case["wav"]
-        if not wav.is_absolute():
-            wav = Path.cwd() / wav
+        wav = resolve(case["wav"])
         wav.parent.mkdir(parents=True, exist_ok=True)
         if wav.exists() and not args.force:
             print(f"[{position}/{len(cases)+args.start-1}] SKIP existing {wav}")
