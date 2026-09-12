@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from conftest import CONFIG
+from service_paths import CONFIG
 from models import BroadcastState
 from notify import plan_notification
 from server import HomeServiceApp

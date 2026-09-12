@@ -17,6 +17,10 @@
 /tools/*
 !/tools/voice-check/
 !/tools/home-check/
+!/tools/unity-check/
+# dotnet build output from the unity-check harness.
+/tools/unity-check/obj/
+/tools/unity-check/bin/
 # Recorded test audio stays local; the *.wav rule below also covers this.
 /tools/voice-check/cases/audio/
 /tools/voice-check/cases/noise-30min/

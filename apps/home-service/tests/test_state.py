@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import CONFIG
+from service_paths import CONFIG
 from models import BroadcastState, DeviceType
 from state import (
     HomeState,

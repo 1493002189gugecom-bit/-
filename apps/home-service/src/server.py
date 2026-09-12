@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from models import DeviceType, VisualObservation, now_ms
+from models import VisualObservation, now_ms
 from notify import plan_notification
 from state import HomeState, StateError, build_default_state
 from tools import TOOL_NAMES, ToolService
@@ -192,18 +192,8 @@ class HomeServiceApp:
 
 
 def _broadcast_payload(task, state: HomeState) -> dict[str, Any]:
-    room = state.rooms[task.room_id]
-    return {
-        "id": task.id,
-        "room_id": task.room_id,
-        "room_name": room.name,
-        "text": task.text,
-        "state": task.state.value,
-        "receipt_id": task.receipt_id,
-        "target_person_ids": list(task.target_person_ids),
-        "version": task.version,
-        "error": task.error,
-    }
+    """Single source of truth for how a broadcast task is serialized."""
+    return state._broadcast_view(task)
 
 
 class _Handler(BaseHTTPRequestHandler):

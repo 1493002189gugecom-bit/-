@@ -74,7 +74,12 @@ def _room_to_dict(room: Room) -> dict[str, Any]:
 
 
 def _person_to_dict(person: Person) -> dict[str, Any]:
-    return asdict(person)
+    data = asdict(person)
+    # location_known is a derived property, so asdict() drops it. Unity and the
+    # Agent both need it explicitly: "no position" must be visible, never
+    # inferred from a missing field.
+    data["location_known"] = person.location_known
+    return data
 
 
 def _broadcast_to_dict(task: BroadcastTask) -> dict[str, Any]:
@@ -203,9 +208,20 @@ class HomeState:
             "rooms": [_room_to_dict(r) for r in self.rooms.values()],
             "devices": [_device_to_dict(d) for d in self.devices.values()],
             "persons": [_person_to_dict(p) for p in self.persons.values()],
-            "broadcasts": [_broadcast_to_dict(t) for t in self.broadcasts.values()],
+            "broadcasts": [self._broadcast_view(t) for t in self.broadcasts.values()],
             "broadcast_queue": list(self.broadcast_queue),
         }
+
+    def _broadcast_view(self, task: BroadcastTask) -> dict[str, Any]:
+        """Broadcast payload with the room name resolved.
+
+        Consumers must not have to join rooms themselves, and the room name has
+        to travel with the task so a highlight can never point at the wrong room.
+        """
+        data = _broadcast_to_dict(task)
+        room = self.rooms.get(task.room_id)
+        data["room_name"] = room.name if room else None
+        return data
 
     def sync(self, since_version: int | None) -> dict[str, Any]:
         """Return either a snapshot or increments, matching design section 8."""
