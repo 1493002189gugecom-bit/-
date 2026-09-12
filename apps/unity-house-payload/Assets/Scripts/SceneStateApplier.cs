@@ -186,11 +186,12 @@ namespace SmartHome
 
             if (person.location_known && !string.IsNullOrEmpty(person.room_id))
             {
-                Transform roomView;
-                if (_deviceViews.Count >= 0 && _roomRenderers.ContainsKey(person.room_id))
+                Renderer room;
+                if (_roomRenderers.TryGetValue(person.room_id, out room))
                 {
-                    roomView = _roomRenderers[person.room_id].transform;
-                    view.position = roomView.position + new Vector3(person.x.GetValueOrDefault(), 0.4f, person.y.GetValueOrDefault());
+                    // PersonDto.x/y are plain floats (0 when the service sends
+                    // null), so no nullable accessor is needed.
+                    view.position = room.transform.position + new Vector3(person.x, 0.4f, person.y);
                 }
             }
         }
