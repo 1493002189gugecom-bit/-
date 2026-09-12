@@ -1,6 +1,6 @@
 # Unity 智能家庭语音 Agent — 实现计划
 
-日期：2026-09-12（修订版 v4）
+日期：2026-09-12（修订版 v5）
 状态：待用户审阅。本计划是执行清单，不代表已开始实施。
 对应设计：`docs/superpowers/specs/2026-09-12-smart-home-voice-agent-design.md`
 
@@ -37,6 +37,17 @@
 8. **A9 无阈值（低）**：补“≥ 18/20 且误触发少于成功次数，否则判未通过”。
 9. **其他（低）**：边界表加注以 2.1 为准；§1 增列 `88cc477`；P3 增建 `models/` 与 `cases/self-trigger/`；A8 自触发录音输出改到独立子目录，避免与用例混放。
 
+**v5（相对 v4）收尾第三轮独立复核指出的文档一致性问题（均不阻塞执行）：**
+
+1. **P2 计数与清单不符**：v4 文中写 44 条，脚本字面实际是 41 条。v5 补上漏列的 `apps/unity-house/Build/`、`Obj/`（应忽略）与 `apps/home-service/README.md`、`apps/unity-house/.gitignore`、`apps/unity-house/README.md`（应放行），并据实改为 **26 应忽略 + 20 应放行 = 46 条**；实测 46/46 通过。
+2. **悬空引用**：`3.2 的模式` 指向不存在的小节，改为“下方 `/apps/*/*` 的放行模式”。
+3. **规则片段与真实文件不一致**：3.1 片段补上 8 条 Unity 生成目录排除。
+4. **§1 未含最新提交**：补 `b911f39`，并说明本文档当前修订将在下一次提交记录。
+5. **显存采样基准混淆**：明确 A 阶段用 A7 单进程环路采样，E 阶段才用 30 分钟并行峰值。
+6. **A9 阈值偏弱**：由“误触发少于成功次数”收紧为**误触发必须为 0**，数据引用 A8 负例。
+
+第三轮复核结论为「可以照着执行」，上述均为文档一致性问题。
+
 ## 0. 执行原则
 
 - 每个任务必须有“运行什么命令、看到什么算通过”；未验证不得声明完成。
@@ -49,7 +60,7 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| 仓库 | `main` 跟踪 `origin/main`；`dd03a75` 设计、`1ac0619` 计划 v1、`4886870`/`152b406` 计划 v2 修订、`88cc477` 计划 v3；工作树干净 |
+| 仓库 | `main` 跟踪 `origin/main`；`dd03a75` 设计、`1ac0619` 计划 v1、`4886870`/`152b406` 计划 v2、`88cc477` 计划 v3、`b911f39` 计划 v4；工作树干净 |
 | 默认 Python | 3.13.2（`E:\py\python.exe`），已有 numpy、onnxruntime、sounddevice、funasr、torch、opencv 等 |
 | 备用 Python | 3.11.9（`C:\Users\1\AppData\Local\Programs\Python\Python311\python.exe`），仅有 pip 24.0 |
 | 音频 | PortAudio V19.7.0 可用；默认输入为「麦克风阵列（网易虚拟音频设备）」，默认输出为 Realtek 扬声器；Realtek 物理麦克风可选 |
@@ -145,7 +156,7 @@
 
 ### 3.1 规则状态
 
-允许列表、音频忽略与 Unity 工程规则已随 `4886870`、`152b406`、`88cc477` 及本次修订生效。本节是回归校验，**正常执行阶段不需要再改 `.gitignore`**；但若新增目录（例如把测试放到 `apps/voice-service/tests/` 之外的新位置），必须先按 3.2 的模式放行并把路径加入 P2 清单，否则会出现“文件写了却静默不入库”。
+允许列表、音频忽略与 Unity 工程规则已随 `4886870`、`152b406`、`88cc477`、`b911f39` 及本次修订生效。本节是回归校验，**正常执行阶段不需要再改 `.gitignore`**；但若新增目录（例如把测试放到 `apps/voice-service/tests/` 之外的新位置），必须先按下方 `/apps/*/*` 的放行模式添加规则，并把该路径加入 P2 清单，否则会出现“文件写了却静默不入库”。
 
 规则现状（截至本次修订）：
 
@@ -185,6 +196,15 @@
 !/apps/unity-house/ProjectSettings/
 !/apps/unity-house/.gitignore
 !/apps/unity-house/README.md
+# Re-assert generated-folder exclusions for this project.
+/apps/unity-house/Library/
+/apps/unity-house/Temp/
+/apps/unity-house/Obj/
+/apps/unity-house/Build/
+/apps/unity-house/Builds/
+/apps/unity-house/Logs/
+/apps/unity-house/UserSettings/
+/apps/unity-house/.vs/
 
 # Local diagnostics, recordings and audio artifacts.
 *.log
@@ -226,7 +246,7 @@ $mustIgnore = @(
  'apps/voice-service/.venv/pyvenv.cfg',
  # Unity generated folders and 3D/model build output
  'apps/unity-house/Library/x.dat','apps/unity-house/Temp/x','apps/unity-house/UserSettings/x.dwlt',
- 'apps/unity-house/Builds/x.exe','apps/unity-house/Logs/x.log',
+ 'apps/unity-house/Build/x','apps/unity-house/Obj/x','apps/unity-house/Builds/x.exe','apps/unity-house/Logs/x.log',
  # old/root Unity layouts must not silently become tracked
  'unity/Assets/x.cs','SmartHome/Assets/x.cs','Assets/x.cs','ProjectSettings/ProjectVersion.txt'
 )
@@ -236,18 +256,19 @@ $mustAllow = @(
  'apps/voice-service/tests/test_session.py','apps/voice-service/pyproject.toml',
  'apps/voice-service/README.md',
  'apps/home-service/src/state.py','apps/home-service/tests/test_state.py',
- 'apps/home-service/config/comfort.json','apps/home-service/pyproject.toml',
+ 'apps/home-service/config/comfort.json','apps/home-service/pyproject.toml','apps/home-service/README.md',
  'apps/unity-house/Assets/Scenes/Main.unity','apps/unity-house/Assets/Scenes/Main.unity.meta',
  'apps/unity-house/Packages/manifest.json','apps/unity-house/ProjectSettings/ProjectVersion.txt',
+ 'apps/unity-house/.gitignore','apps/unity-house/README.md',
  'docs/superpowers/notes/n.md','docs/superpowers/reports/artifacts/r.json'
 )
 foreach ($p in $mustIgnore) { git check-ignore -q -- $p; if ($LASTEXITCODE -eq 0) { "OK ignored: $p" } else { "FAIL should-ignore: $p" } }
 foreach ($p in $mustAllow)  { git check-ignore -q -- $p; if ($LASTEXITCODE -eq 1) { "OK allowed: $p" } else { "FAIL should-allow: $p" } }
 ```
 
-**通过门槛**：**26 条应忽略与 18 条应放行全部输出 `OK`，`FAIL` 数为 0**（共 44 条）；随后 `git add -A -- apps tools docs/superpowers`，`git diff --cached --name-only` 中不出现 `__pycache__`、`config.env`、`.env`、模型、音频或 Unity 生成目录。
+**通过门槛**：**26 条应忽略与 20 条应放行全部输出 `OK`，`FAIL` 数为 0**（共 46 条）；随后 `git add -A -- apps tools docs/superpowers`，`git diff --cached --name-only` 中不出现 `__pycache__`、`config.env`、`.env`、模型、音频或 Unity 生成目录。
 
-**本次修订的实测结果**：44/44 通过，`FAILURES=0`。特别确认 `apps/voice-service/tests/`、`apps/home-service/config/`、`apps/unity-house/Assets|Packages|ProjectSettings` 均可入库，而 `unity/`、根 `Assets/`、`ProjectSettings/` 等旧布局仍被忽略。
+**实测结果**：46/46 通过，`FAILURES=0`（第三轮独立复核复跑一致）。特别确认 `apps/voice-service/tests/`、`apps/home-service/config/`、`apps/unity-house/Assets|Packages|ProjectSettings` 均可入库，而 `unity/`、根 `Assets/`、`ProjectSettings/` 等旧布局仍被忽略。
 
 ### P3. 生成计划所需目录
 
@@ -401,7 +422,7 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 
 对候选唤醒词各录 20 次正例，比较成功次数与误触发。**候选清单固定为**：「小屋小屋」与「你好小屋」；两者都不达标时，再在报告中提出第三候选并说明理由。选定一个写入 `apps/voice-service/src/config.py`，对比数据写入报告。
 
-**达标阈值**（与 A8 一致）：所选唤醒词需 ≥ 18/20 成功，且在其 20 次正例采集过程中的误触发次数低于成功次数。若两个候选都不达标，本项判为未通过并如实报告，不得直接沿用示例词“小屋小屋”而不做说明。**唤醒词不是身份认证**，报告中要写明这一点。
+**达标阈值**（与 A8 一致）：所选唤醒词需 ≥ 18/20 成功；**在其正例采集期间不得出现误触发（误触发次数必须为 0）**，误触发数据以 A8 的负例结果为准。若两个候选都不达标，本项判为未通过并如实报告，不得直接沿用示例词“小屋小屋”而不做说明。**唤醒词不是身份认证**，报告中要写明这一点。
 
 ### A10. 延迟与资源
 
@@ -412,7 +433,10 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 - 首轮语音链路按设计选用 **CPU**，因此需记录并确认**没有意外占用 GPU**（若实测走了 GPU，则峰值显存必须 < 6 GiB，为 Unity 与检测留出余量）。
 - 数据完整记录。识别与合成的具体秒数不设门槛，数值交由用户判断是否可接受。
 
-**显存阈值定义**（A10 与 E1 共用）：6 GiB。本机显存约 8 GiB，扣除系统与显示占用后保留约 2 GiB 给 Unity 场景与人物检测；超过 6 GiB 即视为余量不足，判为不通过。判定依据为 30 分钟并行运行期间 `nvidia-smi` 采样峰值，而非单次瞬时值。
+**显存/内存采样基准（区分阶段）**：
+- **A 阶段（本步）用 A7 实时环路的单进程运行采样**：此时没有 Unity 并行，因此记录的是语音链路的独立占用。
+- **E 阶段才用 30 分钟 Unity 并行运行的 `nvidia-smi` 采样峰值**。
+- **阈值**：显存 6 GiB。本机显存约 8 GiB，扣除系统与显示占用后保留约 2 GiB 给 Unity 场景与人物检测；超过即视为余量不足，判为不通过。以采样峰值为准，不用单次瞬时值。
 
 ### A11. 阶段 A 产出与放行
 
