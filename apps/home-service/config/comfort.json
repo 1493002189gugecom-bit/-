@@ -1,0 +1,32 @@
+{
+  "comfort": {
+    "temp_min": 16.0,
+    "temp_max": 30.0,
+    "comfort_temp": 26.0
+  },
+  "rooms": [
+    { "id": "living_room", "name": "客厅", "simulated_temp": 28.0 },
+    { "id": "bedroom", "name": "卧室", "simulated_temp": 27.0 },
+    { "id": "kitchen", "name": "厨房", "simulated_temp": 29.0 }
+  ],
+  "persons": [
+    {
+      "id": "dad",
+      "display_name": "爸爸",
+      "aliases": ["父亲", "老爸"],
+      "room_id": "bedroom"
+    },
+    {
+      "id": "mom",
+      "display_name": "妈妈",
+      "aliases": ["母亲", "老妈"],
+      "room_id": "kitchen"
+    },
+    {
+      "id": "child",
+      "display_name": "孩子",
+      "aliases": ["小朋友", "宝宝"],
+      "room_id": "living_room"
+    }
+  ]
+}

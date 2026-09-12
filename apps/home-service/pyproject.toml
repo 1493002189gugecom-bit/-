@@ -1,0 +1,17 @@
+[project]
+name = "smart-home-home-service"
+version = "0.1.0"
+description = "Authoritative home state and restricted tool service for the smart-home Agent"
+requires-python = ">=3.11,<3.12"
+# Deliberately dependency-free: the service is standard-library only so it can
+# run anywhere the Agent runs, without dragging in model runtimes.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

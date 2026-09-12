@@ -16,6 +16,7 @@
 !/tools/
 /tools/*
 !/tools/voice-check/
+!/tools/home-check/
 # Recorded test audio stays local; the *.wav rule below also covers this.
 /tools/voice-check/cases/audio/
 /tools/voice-check/cases/noise-30min/
