@@ -1,17 +1,29 @@
 # Unity 智能家庭语音 Agent — 实现计划
 
-日期：2026-09-12（修订版 v2）
+日期：2026-09-12（修订版 v3）
 状态：待用户审阅。本计划是执行清单，不代表已开始实施。
 对应设计：`docs/superpowers/specs/2026-09-12-smart-home-voice-agent-design.md`
 
-## 修订说明（相对 v1）
+## 修订说明
 
-v1 存在四个问题，本版逐条修正：
+**v2（相对 v1）修正四个问题：**
 
-1. **验收循环依赖**：v1 在阶段 A（只有离线脚本）就要求验收“进入对话、播报自触发、设备误操作”，但对话状态机与设备链路尚未实现；阶段 C 又要求自然语言端到端找人通知，而 Agent 在阶段 D。本版把实时语音验证限定为“固定回复、不接家居状态”，设备误操作验收移到 B/C，自然语言端到端验收移到 D。
-2. **缺少可执行细节**：v1 只有目录级描述。本版为阶段 A 写出文件清单、依赖锁定、逐条运行命令与证据格式。
-3. **计划引用的路径被 Git 忽略**：实测 `tools/voice-check/`、`docs/superpowers/notes/`、`docs/superpowers/reports/` 全部被根目录允许列表忽略。本版加入精确放行步骤与验证命令。
-4. **Unity 版本处理不当**：v1 说“不兼容就退回 2022.3 LTS”。跨大版本降级 Unity 工程有风险，本版改为先做兼容性验证再固定版本，禁止正式工程原地降级。
+1. **验收循环依赖**：v1 在阶段 A（只有离线脚本）就要求验收“进入对话、播报自触发、设备误操作”，但对话状态机与设备链路尚未实现；阶段 C 又要求自然语言端到端找人通知，而 Agent 在阶段 D。v2 把实时语音验证限定为“固定回复、不接家居状态”，自然语言端到端验收移到 D。
+2. **缺少可执行细节**：v1 只有目录级描述。v2 为阶段 A 写出文件清单、依赖锁定、逐条运行命令与证据格式。
+3. **计划引用的路径被 Git 忽略**：加入精确放行步骤与验证命令。
+4. **Unity 版本处理不当**：v1 说“不兼容就退回 2022.3 LTS”。跨大版本降级 Unity 工程有风险，v2 改为先做兼容性验证再固定版本。
+
+**v3（相对 v2）修正独立审查发现的九个问题：**
+
+1. **场景 7 无归属**：v2 让 C 覆盖场景 1/3/4、D 覆盖 2/5/6/8/9/10，却同时要求“全部十条场景可复现”，自相矛盾。v3 把场景 7 明确归入 D，并新增“十条场景归属总表”。
+2. **设计门槛缺失**：负例 0 设备误操作、报告中“误操作次数”、10 次播报回听在 v2 全篇缺失，且 v2 自称“已移到 B/C”与实际不符。v3 新增“设计门槛覆盖总表”并逐项落到阶段。
+3. **音频仍会入库**：v2 只忽略了 `cases/audio/`，实测 `cases/wake-pos-*.wav`、`cases/noise-30min/*.wav`、`reports/artifacts/tts/*.wav` 的 `check-ignore` 退出码均为 1（会被提交）；且 v2 所称“音频后缀已忽略”不成立（`.gitignore` 当时没有音频后缀规则）。v3 在 `.gitignore` 增加 `*.wav/*.pcm/*.mp3/*.m4a/*.flac` 全局忽略。
+4. **§3 定性错误**：P1 规则已由 `4886870` 生效，v3 把该节从“修改”改为“校验”，并更新过期的实测证据与仓库现状。
+5. **P3 目录清单不全**：补齐 `cases/audio`、`cases/noise-30min`、`reports/artifacts/tts`。
+6. **自动化/故障测试无归属**：设计第 10 节要求的会话单测、模型服务失败、播报回执、替身＋真实模型验证、TTS 失败在 v2 没有阶段产出，v3 新增对应表。
+7. **E 阶段无通过门槛**：v3 补上不崩溃、不显存耗尽与端到端冷/热启动记录。
+8. **播报链路未定义**：C 门槛要求场景 3，但没有任何阶段定义 Unity↔TTS 播报接口与串行队列语义。v3 新增“播报链路与回执语义”一节。
+9. **措辞含糊**：“再换候选模型”“冲突”“语料未定义”等已改为可判定表述。
 
 ## 0. 执行原则
 
@@ -25,7 +37,7 @@ v1 存在四个问题，本版逐条修正：
 
 | 项目 | 结果 |
 | --- | --- |
-| 仓库 | `main` 跟踪 `origin/main`；`dd03a75` 设计、`1ac0619` 计划 v1；工作树干净 |
+| 仓库 | `main` 跟踪 `origin/main`；`dd03a75` 设计、`1ac0619` 计划 v1、`4886870`/`152b406` 计划 v2 修订；工作树干净 |
 | 默认 Python | 3.13.2（`E:\py\python.exe`），已有 numpy、onnxruntime、sounddevice、funasr、torch、opencv 等 |
 | 备用 Python | 3.11.9（`C:\Users\1\AppData\Local\Programs\Python\Python311\python.exe`），仅有 pip 24.0 |
 | 音频 | PortAudio V19.7.0 可用；默认输入为「麦克风阵列（网易虚拟音频设备）」，默认输出为 Realtek 扬声器；Realtek 物理麦克风可选 |
@@ -53,21 +65,58 @@ v1 存在四个问题，本版逐条修正：
 | 自触发防护（声学回环离线判定） | A |
 | 设备误操作、离线设备、版本冲突 | B |
 | 场景 1/3/4（经测试面板或文字指令） | C |
-| 场景 2/5/6/8/9/10（自然语言端到端） | D |
+| 场景 7（同一唤醒内连续两轮、超时后需重新唤醒） | D |
 
-## 3. 路径放行（先决任务，必须在阶段 A 编码前完成）
+### 2.1 十条场景归属总表（设计第 10 节）
 
-当前 `.gitignore` 采用根目录允许列表，计划所需目录会被忽略。实测证据：
+| # | 场景 | 归属阶段 | 判定方式 |
+| --- | --- | --- | --- |
+| 1 | “打开客厅灯”只改变指定设备，Unity 与权威状态一致 | C | 测试面板按钮 |
+| 2 | “有点热”查正确房间状态后有限调整或追问 | D | 自然语言 |
+| 3 | 跨房间找人通知；同房间去重，不同房间依次播报 | C | 测试面板触发播报任务，验证队列与回执 |
+| 4 | 移动人物后同一请求使用新位置 | C | 拖动后重复测试面板指令 |
+| 5 | 澄清“哪个房间？”→“卧室”完成原请求；同会话承接；退出后不沿用 | D | 自然语言 |
+| 6 | 设备离线、人物位置未知、云端失败不假报成功 | D | 自然语言＋故障注入（离线路径已在 B 单元/集成测试覆盖） |
+| 7 | **唤醒后连续两轮交流；超时/退出后再次操作需要唤醒** | **D** | 一次唤醒内完成两轮；等待超时后确认需重新唤醒 |
+| 8 | 播报不自触发；保护间隔后的正常讲话可识别 | D | 实时回环（离线判定见 A8） |
+| 9 | 普通闲聊、环境噪声与电视负例记录误唤醒/误操作 | D | 负例会话；离线部分见 A8，设备误操作计数在 D |
+| 10 | 手动视觉绑定在轨迹丢失后解除，摄像头观察不改写模拟房间 | D | 摄像头＋拖动交叉验证 |
 
-```text
-.gitignore:3:/*          tools/voice-check/check_audio.py
-.gitignore:9:/docs/superpowers/*   docs/superpowers/notes/model-review.md
-.gitignore:9:/docs/superpowers/*   docs/superpowers/reports/voice-report.md
-```
+场景 7 在 v2 中无归属，是本次修订修正的主要矛盾点。A7 的“可连续复现 3 轮”指重复整轮会话，**不等价于同一唤醒内连续两轮**，因此不能替代场景 7。
 
-### P1. 修改 `.gitignore`
+### 2.2 设计门槛覆盖总表
 
-在现有允许列表段落之后、敏感规则之前追加（敏感规则保持在后，确保仍然生效）：
+| 设计门槛（设计第 10 节） | 落实位置 |
+| --- | --- |
+| 30 条语句关键信息正确 ≥ 27 | A5（关键信息命中 ≥ 27/30） |
+| 20 条 TTS 文本试听 | A6（另收紧为可理解且读音正确 ≥ 18） |
+| 20 次唤醒 ≥ 18 成功 | A8 |
+| 30 分钟无意图音频负例 | A8（语料来源见 A8；设备误操作计数在 B/C/D 各阶段记录） |
+| 10 次播报回听 | **C7**（v2 缺失，本次补上） |
+| 报告误唤醒、误操作、自触发次数 | A11（离线部分）＋ C、D、E 报告（在线部分） |
+| 有限负例不得出现设备误操作 | B4/C7/D6；E 汇总 |
+| 播报自触发 0 次 | A8（声学回环）＋ D6（会话内） |
+| Unity 1080p ≥ 30 FPS | C8 |
+| 并行 30 分钟；RAM/VRAM 峰值、帧率、识别耗时、TTS 首次出声、端到端冷/热启动 | E1 |
+| 不得崩溃或显存耗尽 | A10（进程级）＋ E2（整机并行） |
+
+### 2.3 自动化与故障测试归属（设计第 10 节“自动化边界”）
+
+| 设计要求 | 归属 |
+| --- | --- |
+| 状态/策略单测（目标解析、去重、范围、版本冲突、操作去重） | B |
+| 会话单测（唤醒、20 秒超时、退出、澄清承接、播放期间禁识别） | D（纯逻辑部分可用替身，在 D1 先行） |
+| 集成测试（Unity 连接、快照/增量/重连） | C |
+| 集成测试（模型服务失败、播报回执） | C（回执）＋ D（模型失败） |
+| 外部模型用可控替身测试程序逻辑，另做真实模型验证 | D |
+| 故障测试（离线、超时提交前/后、重复请求、服务重启） | B |
+| 故障测试（TTS 失败） | D |
+
+## 3. 路径放行校验（`.gitignore` 规则已生效，本阶段只做校验）
+
+`.gitignore` 的允许列表与音频忽略规则已随 `4886870`/`152b406` 及本次修订生效。**不再需要修改 `.gitignore`**；本节是对已生效规则的回归校验，必须在阶段 A 编码前通过。
+
+规则现状（截至本次修订）：
 
 ```gitignore
 !/docs/superpowers/notes/
@@ -77,6 +126,7 @@ v1 存在四个问题，本版逐条修正：
 !/tools/
 /tools/*
 !/tools/voice-check/
+/tools/voice-check/cases/audio/
 
 !/apps/
 /apps/*
@@ -90,31 +140,66 @@ v1 存在四个问题，本版逐条修正：
 !/apps/home-service/src/
 !/apps/home-service/tests/
 !/apps/home-service/requirements.lock.txt
+
+# Local diagnostics, recordings and audio artifacts.
+*.log
+*.wav
+*.pcm
+*.mp3
+*.m4a
+*.flac
+recordings/
+.superpowers/
 ```
 
-注意：`/apps/voice-service/*` 这类规则会忽略目录内所有文件，因此需要在其后**再单独放行** `requirements.lock.txt`。
+要点：
+- `/apps/voice-service/*` 会忽略目录内所有文件，因此在其后单独放行 `requirements.lock.txt`。
+- 音频按**后缀全局忽略**，不依赖具体子目录，因此 `cases/audio/`、`cases/noise-30min/`、`reports/artifacts/tts/` 下的 `.wav` 都被覆盖，无需逐目录放行。若将来某个音频确实需要入库，必须写一条显式 `!` 规则并在此记录原因。
+- 子目录（`cases/audio/`、`cases/noise-30min/`、`reports/artifacts/tts/`）本身不影响忽略结果，但需要在 P3 创建以便脚本直接写入。
 
-### P2. 验证命令与预期结果（用退出码判断）
+### P2. 校验命令与预期结果（必须用 `-q` 的退出码判断）
 
-`git check-ignore` 的退出码：`0` = 被忽略，`1` = 未被忽略。**不要用输出文本判断**，未忽略时它也会打印匹配到的否定规则（以 `!` 开头），容易看反。
+`git check-ignore` 的退出码：`0` = 被忽略，`1` = 未被忽略。
+
+**必须加 `-q`。** 本机实测（同一条已放行路径）：
+
+```text
+git check-ignore -q -- apps/voice-service/requirements.lock.txt   → exit=1（正确：未忽略）
+git check-ignore    -- apps/voice-service/requirements.lock.txt   → exit=1
+git check-ignore -v -- apps/voice-service/requirements.lock.txt   → exit=0 且打印 !.gitignore:27:…
+```
+
+`-v` 只要匹配到任意规则就返回 0，命中否定规则（`!`）时同样如此，会让人把“已放行”误判成“被忽略”。因此 `-v` 只用于**查看是哪条规则匹配**，不能用于判断是否被忽略。
 
 ```powershell
-$expectIgnored = @('apps/voice-service/__pycache__/x.pyc','apps/voice-service/config.env','.env','models/x.onnx','recordings/a.wav')
-foreach ($p in $expectIgnored) { git check-ignore -q -- $p; if ($LASTEXITCODE -eq 0) { "OK ignored: $p" } else { "FAIL: $p" } }
-
-$expectAllowed = @('apps/voice-service/requirements.lock.txt','apps/voice-service/src/loop.py','apps/home-service/tests/test_state.py','tools/voice-check/cases/asr-30.tsv','docs/superpowers/notes/n.md','docs/superpowers/reports/artifacts/r.json')
-foreach ($p in $expectAllowed) { git check-ignore -q -- $p; if ($LASTEXITCODE -eq 1) { "OK allowed: $p" } else { "FAIL: $p" } }
+$mustIgnore = @(
+ '.env','models/x.onnx','recordings/a.wav','debug.log','upstream-src/README.md','task_plan.md',
+ 'apps/voice-service/__pycache__/x.pyc','apps/voice-service/config.env',
+ 'tools/voice-check/cases/wake-pos-001.wav','tools/voice-check/cases/noise-30min/a.wav',
+ 'tools/voice-check/cases/audio/asr-001.wav','docs/superpowers/reports/artifacts/tts/tts-001.wav',
+ 'apps/voice-service/src/probe.wav','docs/superpowers/reports/artifacts/loop-session.log'
+)
+$mustAllow = @(
+ 'tools/voice-check/cases/asr-30.tsv','tools/voice-check/cases/tts-20.tsv',
+ 'apps/voice-service/src/loop.py','apps/voice-service/requirements.lock.txt',
+ 'apps/home-service/src/state.py','apps/home-service/tests/test_state.py',
+ 'docs/superpowers/notes/n.md','docs/superpowers/reports/artifacts/r.json'
+)
+foreach ($p in $mustIgnore) { git check-ignore -q -- $p; if ($LASTEXITCODE -eq 0) { "OK ignored: $p" } else { "FAIL should-ignore: $p" } }
+foreach ($p in $mustAllow)  { git check-ignore -q -- $p; if ($LASTEXITCODE -eq 1) { "OK allowed: $p" } else { "FAIL should-allow: $p" } }
 ```
 
-**通过门槛**：全部输出 `OK`；随后 `git add -A -- apps tools docs/superpowers` 后，`git diff --cached --name-only` 中不出现 `__pycache__`、`config.env`、`.env`、模型或音频文件。
+**通过门槛**：**14 条应忽略与 8 条应放行全部输出 `OK`，`FAIL` 数为 0**；随后 `git add -A -- apps tools docs/superpowers`，`git diff --cached --name-only` 中不出现 `__pycache__`、`config.env`、`.env`、模型或任何音频文件。
+
+**本次修订的实测结果**：22/22 通过，`FAILURES=0`。
 
 ### P3. 生成计划所需目录
 
 ```powershell
-New-Item -ItemType Directory -Force -Path 'tools/voice-check/cases','apps/voice-service/src','apps/home-service/src','apps/home-service/tests','docs/superpowers/notes','docs/superpowers/reports/artifacts' | Out-Null
+New-Item -ItemType Directory -Force -Path 'tools/voice-check/cases/audio','tools/voice-check/cases/noise-30min','apps/voice-service/src','apps/home-service/src','apps/home-service/tests','docs/superpowers/notes','docs/superpowers/reports/artifacts/tts' | Out-Null
 ```
 
-`docs/superpowers/reports/artifacts/` 已随本计划提交一个说明文件，保证目录存在于仓库中。
+`docs/superpowers/reports/artifacts/` 已随计划提交说明文件，保证目录存在于仓库中。`tts/`、`audio/`、`noise-30min/` 里的音频由 `.gitignore` 的音频后缀规则忽略，不需要额外放行或忽略。
 
 ---
 
@@ -153,6 +238,14 @@ py -3.11 -m venv .venv
 | 识别 | SenseVoiceSmall int8 | — |
 | 合成 | Kokoro 中英 v1.1（int8 优先） | — |
 
+**备选（仅在主选不达标时启用，不预先下载）**：
+
+| 用途 | 备选 |
+| --- | --- |
+| 识别 | faster-whisper small / medium（CTranslate2，CPU int8） |
+| 合成 | CosyVoice2-0.5B（资源占用更高，仅在 Kokoro 中文听感不达标时评估） |
+| 唤醒 | sherpa-onnx KWS zipformer 中英 3M 2025-12-20 |
+
 核验清单（每项都要有结论）：
 1. 下载地址可访问，文件大小与官方文档一致。
 2. 许可证名称、是否允许预期用途、是否要求署名。
@@ -167,9 +260,9 @@ py -3.11 -m venv .venv
 A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 
 - 录音工具：`tools/voice-check/record_wav.py`（同一脚本也用于 A8 唤醒正例）。
-- 设备：显式指定 Realtek 物理麦克风，**不使用当前默认的网易虚拟音频设备**，也不修改系统默认。
+- 设备：显式指定 Realtek 物理麦克风，**不使用当前默认的网易虚拟音频设备**，也不修改系统默认。设备全名已实测存在：「麦克风阵列 (Realtek(R) Audio)」与「扬声器 (Realtek(R) Audio)」，各 1 个，可唯一定位。
 - 格式：16 kHz、单声道、16-bit PCM WAV（与 KWS/ASR 输入要求一致，避免重采样引入差异）。
-- 命名：`tools/voice-check/cases/audio/asr-001.wav` 依次编号；唤醒正例 `wake-pos-001.wav`；唤醒词对比 `wake-<词>-001.wav`。
+- 命名：`tools/voice-check/cases/audio/asr-001.wav` 依次编号；唤醒正例放 `tools/voice-check/cases/wake-pos-001.wav`（A8 用）；唤醒词对比 `tools/voice-check/cases/wake-<词>-001.wav`。
 - 每次录音前打印所选用设备名、采样率与时长，录音后回放确认无静音、无削波。
 
 命令：
@@ -178,7 +271,7 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 .\.venv\Scripts\python.exe tools/voice-check/record_wav.py --input-device "麦克风阵列 (Realtek(R) Audio)" --seconds 4 --out tools/voice-check/cases/audio/asr-001.wav
 ```
 
-**通过门槛**：30 条语句全部录制完成，逐条回放可听清；`cases/asr-30.tsv` 的 `wav路径` 与实际文件名一一对应。录音文件不入库（`recordings/` 与音频后缀已忽略，`cases/audio/` 需加入忽略，见 P1）。
+**通过门槛**：30 条语句全部录制完成，逐条回放可听清；`cases/asr-30.tsv` 的 `wav路径` 与实际文件名一一对应。音频不入库——由 `.gitignore` 的 `*.wav` 等后缀规则全局忽略（见第 3 节），不需要逐目录配置。
 
 ### A5. 离线识别验证（门槛项）
 
@@ -196,7 +289,7 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 .\.venv\Scripts\python.exe tools/voice-check/check_asr.py --cases tools/voice-check/cases/asr-30.tsv --out docs/superpowers/reports/artifacts/asr-results.json
 ```
 
-**通过门槛**：关键信息命中 ≥ 27/30。未达标则先排查麦克风与设备、再换候选模型，仍不达标如实记录。
+**通过门槛**：关键信息命中 ≥ 27/30。未达标时按顺序处理：(1) 排查麦克风、距离与录音格式；(2) 改用 A3 备选列的模型（faster-whisper small 或 medium）；(3) 仍不达标则如实记录未通过，并附失败条目，不降低此门槛。
 
 ### A6. 离线合成验证（门槛项）
 
@@ -230,33 +323,39 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 
 ### A8. 唤醒与自触发验证
 
-1. **正例**：连续 20 次主动唤醒，记录成功次数。
-2. **负例**：连续播放 30 分钟无意图音频（对话、视频），记录误唤醒次数。
+脚本：`tools/voice-check/check_wake.py`
+
+- 输入：`--positives N`（实时唤醒次数）、`--negatives-dir`（负例音频目录）、`--self-trigger-out`（声学回环录音输出目录）。
+- 行为：正例逐次调用 KWS 并记录是否触发；负例对目录内每个音频文件离线运行 KWS，累计触发次数；自触发录音再离线跑 KWS 与 ASR，输出是否出现唤醒词或指令文字。
+- 输出：`docs/superpowers/reports/artifacts/wake-results.json`，含正例成功数、负例触发数、自触发命中文本。
+
+1. **正例**：连续 20 次主动唤醒，录音存 `tools/voice-check/cases/wake-pos-###.wav`，记录成功次数。
+2. **负例**：连续播放 30 分钟无意图音频（对话、视频），**语料来源须在报告中写明具体来源与文件清单**（本机播放的视频/播客，或公开音频）；文件放 `tools/voice-check/cases/noise-30min/`，并记录实际总时长。
 3. **自触发（声学回环）**：正常音量播放固定回复，同时用麦克风录制；对录制文件离线运行 KWS 与识别，检查是否出现唤醒或指令文字。
 
-命令示例：
+命令：
 
 ```powershell
-.\.venv\Scripts\python.exe tools/voice-check/check_wake.py --positives 20 --negatives-dir tools/voice-check/cases/noise-30min --out docs/superpowers/reports/artifacts/wake-results.json
+.\.venv\Scripts\python.exe tools/voice-check/check_wake.py --positives 20 --negatives-dir tools/voice-check/cases/noise-30min --self-trigger-out tools/voice-check/cases --out docs/superpowers/reports/artifacts/wake-results.json
 ```
 
-**通过门槛**：20 次唤醒中 ≥ 18 次成功；负例 30 分钟误唤醒记录并报告数量；自触发录制中不出现指令文字。
+**通过门槛**：20 次唤醒中 ≥ 18 次成功；负例 30 分钟误唤醒次数记录并报告（无硬门槛，用于评估）；自触发录制中不出现指令文字。**注意**：A 阶段尚无家居设备，因此本阶段不产生“设备误操作”数据，该计数在 B/C/D 记录，见 2.2。
 
 ### A9. 唤醒词选择
 
-对候选唤醒词（例如“小屋小屋”“你好小屋”）各录 20 次正例，比较成功次数与误触发。选择一个固定在 `apps/voice-service/src/config.py`，并把对比数据写入报告。**唤醒词不是身份认证**，报告中要写明这一点。
+对候选唤醒词各录 20 次正例，比较成功次数与误触发。**候选清单固定为**：「小屋小屋」与「你好小屋」；两者都不达标时，再在报告中提出第三候选并说明理由。选定一个写入 `apps/voice-service/src/config.py`，对比数据写入报告。**唤醒词不是身份认证**，报告中要写明这一点。
 
 ### A10. 延迟与资源
 
-在实时环路中记录：冷启动首次识别耗时、热启动识别耗时、TTS 首次出声时间、进程峰值内存、GPU 是否被占用。
+在实时环路中记录：冷启动首次识别耗时、热启动识别耗时、TTS 首次出声时间、进程峰值内存、峰值显存、GPU 是否被占用。
 
-**通过门槛**：不崩溃、不耗尽内存；数据完整记录（不设秒数门槛，数值交由用户判断是否可接受）。
+**通过门槛**：不崩溃；进程峰值显存 < 8 GiB 上限（超出即为不通过，因为要与 Unity 并行）；数据完整记录。识别与合成的具体秒数不设门槛，数值交由用户判断是否可接受。
 
 ### A11. 阶段 A 产出与放行
 
 报告：`docs/superpowers/reports/2026-09-12-phase-a-voice-report.md`
 
-必须包含：环境与依赖版本、四个模型核验结论、30 条转写逐条结果、20 条 TTS 试听结果、唤醒正负例与自触发结果、延迟与资源表、失败案例、明确的“通过/不通过”结论。
+必须包含：环境与依赖版本、四个模型核验结论、30 条转写逐条结果、20 条 TTS 试听结果、唤醒正负例（含负例语料来源与总时长）与自触发结果、延迟与资源表（含峰值显存）、失败案例、误唤醒次数、明确的“通过/不通过”结论。
 
 **未通过时不得进入阶段 B。**
 
@@ -273,15 +372,23 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 5. 单元测试：目标解析、房间去重、范围校验、版本冲突、操作去重。
 6. 集成测试：模拟设备离线、超时、部分成功、重复请求、服务重启。
 7. 接口默认绑定 `127.0.0.1`，不开放局域网。
-8. 代码放在 `apps/home-service/`（需按第 3 节模式加入允许列表）。
+8. 代码放在 `apps/home-service/`（放行规则已生效，见第 3 节）。
 
-**通过门槛**：`pytest` 全绿且离线、冲突、去重路径均有对应用例；用文字请求脚本可复现“开灯”“调空调”“按人去重播报”。
+**“播报”在本阶段的判定**：B 只产生播报**任务**，不播放音频。因此本阶段的通过标准是任务层面的可判定状态，而不是“听到声音”：
+
+- 任务状态机：`queued` → `playing` → `played` → `failed`（第五个终态 `cancelled` 可选）。
+- 按房间去重：同一房间多个目标合并为一个任务。
+- 不同房间：按接收顺序串行排队，一次只有一个任务处于 `playing`。
+- 只有 `played` 才允许回复“已播报”；`queued` 只能说“已安排播报”；`failed` 必须报失败。
+- 真实音频回执在 C 阶段接上 Unity 播放后验证。
+
+**通过门槛**：`pytest` 全绿且离线、冲突、去重路径均有对应用例；用文字请求脚本可复现“开灯”“调空调”，并产生符合上述状态机与去重规则的播报任务（含同房间合并、跨房间串行、`failed` 不冒充成功）。本阶段记录**设备误操作次数**（期望 0）。
 
 ---
 
 ## 阶段 C：最小 Unity 小屋（测试面板驱动）
 
-1. **版本决策（先验证再固定）**：用目标版本建最小验证工程，确认 JSON/WebSocket 与目标 .NET 可用后固定版本。若 Unity 6 与所需包冲突，则**用 2022.3 重建工程**，禁止把已建工程原地跨大版本降级。
+1. **版本决策（先验证再固定）**：用目标版本建最小验证工程，确认 JSON/WebSocket 与目标 .NET 可用后固定版本。判定“冲突”的具体标准：所需包在 Unity 6 下无法安装或编译报错，或 JSON 序列化/WebSocket 在目标 .NET 下测试不通过。出现任一情形则**用 2022.3 重建工程**，禁止把已建工程原地跨大版本降级。
 2. 三个房间、灯、空调、房间播报点；人物用圆点＋名字。
 3. 连接状态服务：初始快照、增量同步、断线重连。
 4. 拖动人物提交位置；模拟室温由测试面板修改。
@@ -289,7 +396,34 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 6. 用单个扬声器按房间播报并高亮目标房间。
 7. 本阶段通过**测试面板按钮与文字输入**验证场景，不要求自然语言。
 
-**通过门槛**：设计文档「必须通过的场景」第 1、3、4 条可复现（含移动人物后使用新位置）；Unity 1080p ≥ 30 FPS。
+### C6. 播报链路与回执语义（本节是场景 3 可判定的前提）
+
+```text
+状态服务（播报任务 queued）
+        ↓ 串行队列取队首
+Unity 请求 TTS 服务合成该条文本
+        ↓ 返回音频（或失败）
+Unity 播放，房间播报点高亮，界面显示“正在播报：<房间>”
+        ↓ 播放结束回调
+Unity 上报 played/failed + 任务 ID
+        ↓
+状态服务更新任务终态；仅 played 允许“已播报”措辞
+```
+
+- 队列由状态服务维护，Unity 只消费队首任务，**不允许并行播放**。
+- Unity 上报必须携带任务 ID；ID 不匹配或超时上报视为失败，不自动重播。
+- TTS 合成失败 → 任务直接 `failed`，不播放、不重试、不声称成功。
+- 高亮与界面文本必须与实际播放的房间一致；单个扬声器无法物理分区，界面须标注“模拟分区播报”。
+
+### C7. 播报回听（设计门槛项）
+
+按设计第 10 节要求做 **10 次播报回听**：对 10 个不同房间/内容组合的任务，人工确认实际播放内容与目标房间一致、高亮正确、状态从 `queued` 正确走到 `played`。
+
+**通过门槛**：10 次回听全部内容与目标房间一致，任务状态流转正确；出现任意一次错房间、错内容或状态不推进即为不通过。本阶段记录**设备误操作次数**与**播报回执错误次数**（均期望 0）。
+
+### C8. 阶段 C 通过门槛
+
+设计文档「必须通过的场景」第 **1、3、4** 条可复现（含移动人物后使用新位置）；C7 十次回听通过；Unity 1080p ≥ 30 FPS。
 
 ---
 
@@ -300,18 +434,22 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 3. Agent 编排：工具选择、超时、工具轮数上限、澄清状态、操作 ID 复用。
 4. 接入语音会话状态机：静音、待机、听取、处理、播报、20 秒退出。
 5. 接入本地人物检测与手动身份绑定；轨迹丢失解除绑定；视觉不覆盖模拟位置。
-6. 验证「必须通过的场景」第 2、5、6、8、9、10 条。
+6. **会话单测先行**（纯逻辑，可用替身）：唤醒、20 秒超时、退出、澄清承接、播放期间禁识别。
+7. **故障测试**：TTS 失败、模型服务失败、超时提交前/后；外部模型先用可控替身测程序逻辑，再做真实模型验证。
+8. 验证「必须通过的场景」第 **2、5、6、7、8、9、10** 条。
 
-**通过门槛**：全部十条场景可复现，含失败与澄清路径。
+**通过门槛**：D 归属的全部场景（2、5、6、7、8、9、10）可复现，加上 C 已验收的 1、3、4，合计十条；含失败与澄清路径；会话单测与故障测试全绿；TTS 失败时保留文字反馈且不重复执行设备操作。本阶段记录**设备误操作次数**、**误唤醒次数**、**播报自触发次数**（均期望 0）。
 
 ---
 
 ## 阶段 E：并行与故障验收
 
-1. Unity ＋ ASR ＋ TTS ＋ 检测并行运行 ≥ 30 分钟，记录 RAM/VRAM 峰值、帧率、各段延迟。
-2. 云端延迟单独测量并报告；由用户确认是否可接受。
-3. 汇总报告：`docs/superpowers/reports/2026-09-12-acceptance-report.md`。
+1. Unity ＋ ASR ＋ TTS ＋ 检测并行运行 ≥ 30 分钟，记录 RAM/VRAM 峰值、帧率、识别耗时、TTS 首次出声。
+2. **端到端延迟必须区分冷启动与热启动**（各测 ≥ 5 次并给出中位数），云端延迟单独测量并报告；由用户确认是否可接受。
+3. 汇总报告：`docs/superpowers/reports/2026-09-12-acceptance-report.md`，汇总各阶段记录的误唤醒、**误操作**、自触发次数与 10 次播报回听结果。
 4. 未通过项如实列出。
+
+**通过门槛**：30 分钟并行不崩溃、不显存耗尽（峰值显存不触及上限且无 OOM/驱动重置）；上述指标与冷/热启动延迟齐全；报告中列表完整，未通过项有明确说明。
 
 ---
 
@@ -336,7 +474,7 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 | 默认麦克风是虚拟设备 | 脚本显式选择 Realtek 物理麦克风；不改系统默认 |
 | 唤醒误触发偏高 | 调整 boosting score 与触发阈值；仍不达标则如实报告 |
 | 模型许可证不清 | 停止下载，先核验许可证再决定 |
-| Unity 版本冲突 | 先建最小验证工程；冲突则用 2022.3 重建，禁止原地降级 |
+| Unity 版本冲突 | 判定标准见阶段 C 第 1 条；冲突则用 2022.3 重建，禁止原地降级 |
 | 云端账单超预期 | 厂商预算告警＋应用侧请求数与轮数上限 |
 | 实时环路回声 | 播报期间丢弃输入；用 A8 离线回环验证 |
 
@@ -345,5 +483,5 @@ A4/A5/A6 都需要真实录音，必须先统一录音与文件格式：
 1. 是否按 A → B → C → D → E 顺序执行。
 2. 阶段 A 是否允许安装 Python 3.11 虚拟环境依赖并下载四个模型。
 3. Unity 先用 `6000.0.23f1c1` 做兼容性验证吗（冲突则用 2022.3 重建）。
-4. 唤醒词候选：“小屋小屋”与“你好小屋”对比后固定。
+4. 唤醒词候选固定为“小屋小屋”与“你好小屋”，对比后选定。
 5. 云端 LLM 厂商留到阶段 D 再定。

@@ -58,8 +58,15 @@ models/
 *.safetensors
 *.gguf
 
-# Local diagnostics and recordings
+# Local diagnostics, recordings and audio artifacts.
+# All audio is local test data: never commit it. Un-ignore a specific file with
+# an explicit `!` rule only if it is genuinely meant to be documentation.
 *.log
+*.wav
+*.pcm
+*.mp3
+*.m4a
+*.flac
 recordings/
 .superpowers/
 
