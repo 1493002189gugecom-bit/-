@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +38,29 @@ def play(wav: Path, device_index: int) -> None:
         device=device_index,
     ) as stream:
         stream.write(np.asarray(samples, dtype=np.float32).reshape(-1, 1))
+        # Let buffered audio drain before the stream closes.
+        time.sleep(0.3)
+
+
+def play_native(wav: Path) -> None:
+    """Play through the Windows default endpoint without PortAudio."""
+    import winsound
+
+    winsound.PlaySound(str(wav), winsound.SND_FILENAME)
+
+
+def play_with_fallback(wav: Path, device_index: int, mode: str) -> str:
+    """Play a WAV, returning the player that was actually used."""
+    if mode in ("auto", "portaudio"):
+        try:
+            play(wav, device_index)
+            return "portaudio"
+        except Exception as exc:  # noqa: BLE001
+            print(f"    PortAudio 播放失败: {type(exc).__name__}: {exc}")
+            if mode == "portaudio":
+                raise
+    play_native(wav)
+    return "winsound"
 
 
 def listening_gate(results: list[dict], required: int, min_passed: int) -> bool:
@@ -49,6 +73,12 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=Path("docs/superpowers/reports/artifacts/tts-listening.json"))
     parser.add_argument("--output-contains", default=config.DEFAULT_OUTPUT_DEVICE)
     parser.add_argument("--min-passed", type=int, default=18, help="Phase A listening threshold (default 18/20)")
+    parser.add_argument(
+        "--player",
+        choices=("auto", "portaudio", "winsound"),
+        default="auto",
+        help="auto falls back to the Windows native player if PortAudio fails",
+    )
     args = parser.parse_args()
 
     generated = json.loads(args.generation_report.read_text(encoding="utf-8"))
@@ -62,6 +92,7 @@ def main() -> int:
     print("评分：y=清晰可懂；n=不通过；r=重播；q=保存退出")
 
     results = []
+    warned_native = False
     for case in generated["results"]:
         if case["id"] in previous:
             results.append(previous[case["id"]])
@@ -70,7 +101,10 @@ def main() -> int:
         wav = Path(case["wav"])
         while True:
             print(f"\n{case['id']}: {case['text']}")
-            play(wav, output.index)
+            used = play_with_fallback(wav, output.index, args.player)
+            if used == "winsound" and not warned_native:
+                print("    注意：PortAudio 不可用，已改用 Windows 原生播放（走系统默认输出设备）。")
+                warned_native = True
             answer = input("是否清晰可懂？[y/n/r/q] ").strip().lower()
             if answer == "r":
                 continue
