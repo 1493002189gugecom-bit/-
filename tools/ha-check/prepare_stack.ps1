@@ -1,10 +1,19 @@
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..\..'),
+    [string]$RepoRoot,
     [switch]$RotateCredentials
 )
 
 $ErrorActionPreference = 'Stop'
+
+# $PSScriptRoot is empty inside a param() default value in Windows PowerShell 5.1,
+# so the repository root is resolved in the body instead. That keeps the script
+# working both when it is invoked directly and when it is launched in a nested
+# "powershell -File" process.
+if (-not $RepoRoot) {
+    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $RepoRoot = (Resolve-Path (Join-Path $scriptDir '..\..')).Path
+}
 # Windows PowerShell 5.1 promotes a native command's stderr into a terminating
 # error once $ErrorActionPreference is 'Stop', and Docker writes its progress to
 # stderr. Every native call below therefore redirects stderr to $null and is

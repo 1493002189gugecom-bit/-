@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   Start the whole voice-agent chain: Home Assistant stack, home-service, voice loop.
 
@@ -19,7 +19,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..\..'),
+    [string]$RepoRoot,
     [int]$ServicePort = 8765,
     [switch]$SkipStack,
     [switch]$NoAgent,
@@ -28,6 +28,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# $PSScriptRoot is empty inside a param() default value in Windows PowerShell 5.1,
+# so the repository root is resolved in the body instead.
+if (-not $RepoRoot) {
+    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $RepoRoot = (Resolve-Path (Join-Path $scriptDir '..\..')).Path
+}
 # Windows PowerShell 5.1 decodes child-process output with the console codepage,
 # which mangles the Chinese this project prints. Pairing PYTHONIOENCODING with a
 # UTF-8 console reader keeps the wake-word prompt and replies readable.
