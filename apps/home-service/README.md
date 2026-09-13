@@ -105,3 +105,80 @@ Only `played` permits "已播报". `failed` never claims success.
 Covers target resolution, room dedupe, range validation, version conflicts,
 operation dedupe, offline devices, partial success, broadcast receipts, duplicate
 requests over HTTP, and restart behaviour.
+
+# Home Assistant backend
+
+The service can instead drive real Home Assistant entities. Both backends live in
+the same process; exactly one is selected, and there is **no silent fallback**.
+
+| Variable | Meaning |
+| --- | --- |
+| `HOME_SERVICE_BACKEND` | `memory` (default) or `ha`. Any other value refuses to start. |
+| `HOME_ASSISTANT_URL` | Usually `http://127.0.0.1:8123` |
+| `HOME_ASSISTANT_TOKEN` | Long-lived access token; may instead come from `HA_ENV_FILE` |
+| `HA_ENV_FILE` | Local git-ignored file holding `HOME_ASSISTANT_URL` / `HOME_ASSISTANT_TOKEN` |
+| `HA_ENTITY_CATALOG` | Defaults to `config/ha_entities.json` |
+| `HA_OPERATION_DB` | SQLite path for the operation state machine |
+
+## Create the token yourself
+
+Open <http://127.0.0.1:8123/profile/security>, create a long-lived access token,
+and save it locally — never into Git, a script, or a chat message:
+
+```powershell
+Set-Content runtime\home-assistant\ha.env "HOME_ASSISTANT_TOKEN=<token>"
+```
+
+## Start the closed loop
+
+```powershell
+# 1) Generate local broker credentials (idempotent; secrets are never printed)
+#    and build the simulator image.
+.\tools\ha-check\prepare_stack.ps1
+
+# 2) Start Home Assistant, Mosquitto and the simulator on the existing stack.
+docker compose --env-file runtime\home-assistant\compose.env `
+  -f D:\dac\docker-compose.yml `
+  -f infra\home-assistant\compose.override.yaml up -d
+
+# 3) Point the existing MQTT integration at the new broker credentials.
+$env:HA_ENV_FILE     = 'E:\智能家居\runtime\home-assistant\ha.env'
+$env:SHV_ENV_FILE    = 'E:\智能家居\runtime\home-assistant\stack.env'
+.\.venv\Scripts\python.exe tools\ha-check\setup_mqtt.py
+
+# 4) Run the HA-backed service on loopback.
+$env:HOME_SERVICE_BACKEND = 'ha'
+$env:HOME_ASSISTANT_URL   = 'http://127.0.0.1:8123'
+$env:HA_OPERATION_DB      = 'E:\智能家居\runtime\home-assistant\operations.sqlite3'
+.\.venv\Scripts\python.exe apps\home-service\src\server.py
+
+# 5) Verify the whole loop, including fault injection.
+.\.venv\Scripts\python.exe tools\ha-check\acceptance.py
+```
+
+Only Home Assistant publishes a host port, and only on `127.0.0.1:8123`.
+MQTT stays on the Compose-internal network.
+
+## What "confirmed" means here
+
+Writes are persisted as `accepted -> submitted -> confirmed | unconfirmed |
+rejected`. The API only reports success after the entity is **observed** in the
+target state; an HTTP 200 from Home Assistant proves only that the request was
+accepted. A timeout is reported as `confirmation_timeout` with status
+`unconfirmed` — never as success, and never as proof the device failed.
+
+Reusing an `operation_id` with the same arguments replays the stored outcome;
+reusing it with different arguments returns `operation_id_conflict`. On restart,
+`accepted` operations may be submitted once, while `submitted` and `unconfirmed`
+operations are only reconciled against observed state, because a blind resend
+could actuate a device twice.
+
+Fault controls (offline, fixed delay, next-command failure) are local admin
+only: they are driven by `runtime/home-assistant/fault-control.json` and are
+never exposed as Agent tools.
+
+## Tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest apps/home-service/tests tools/ha-check/tests -q
+```
