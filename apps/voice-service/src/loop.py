@@ -1,16 +1,16 @@
-"""Minimal wake-once continuous local voice loop for Phase A7/A8.
+"""Wake-once continuous local voice loop with the cloud Agent.
 
 Behavior:
-- Explicitly uses the physical Realtek microphone, not Windows' virtual default.
+- Explicitly uses the physical microphone, not Windows' virtual default.
 - Standby listens only for one of the configured wake words.
 - After waking, VAD segments continuous utterances and SenseVoice transcribes.
-- The active session returns to standby after 20 seconds without a completed
-  utterance, or immediately when the user says "退出"/"结束对话".
+- With `--agent`, the transcript is routed through the cloud LLM, which may call
+  the restricted home-service tools; the reply is spoken with the configured TTS.
+  Without it the loop speaks a fixed acknowledgement and touches no device.
+- The active session returns to standby after the idle timeout without a
+  completed utterance, or immediately on "退出"/"结束对话".
 - Microphone blocks are discarded while TTS is playing, preventing playback
   from triggering recognition.
-
-This is a local validation loop, not the cloud Agent. It does not control any
-home device and only speaks a fixed acknowledgement.
 """
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
+import agent_session
 import audio_utils
 import config
 import playback
@@ -122,7 +123,29 @@ def main() -> int:
     parser.add_argument("--no-tts", action="store_true", help="print only; useful for diagnostics")
     parser.add_argument("--startup-check", action="store_true", help="validate devices/models, then exit without opening the microphone")
     parser.add_argument("--run-seconds", type=float, default=0.0, help="diagnostic: stop automatically after N seconds")
+    parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="route transcripts through the cloud LLM agent (also enabled by SMART_HOME_AGENT=1)",
+    )
+    parser.add_argument("--service-url", default=config.home_service_url())
+    parser.add_argument("--agent-deadline", type=float, default=config.agent_deadline_seconds())
+    parser.add_argument("--agent-max-tool-rounds", type=int, default=config.agent_max_tool_rounds())
     args = parser.parse_args()
+
+    # Validate the agent configuration before loading any model, so a missing key
+    # fails immediately instead of after a slow model warm-up.
+    agent_requested = args.agent or config.agent_enabled()
+    agent_api_key = ""
+    if agent_requested:
+        agent_api_key = config.agent_api_key()
+        if not agent_api_key:
+            print(
+                "agent requested but DEEPSEEK_API_KEY is not set.\n"
+                f"Put it in {config.agent_env_file()} (git-ignored) or the environment.",
+                file=sys.stderr,
+            )
+            return 2
 
     input_device = audio_utils.select_input_device(args.input_contains, config.SAMPLE_RATE)
     output_target = None if args.no_tts else audio_utils.select_playback_target(args.output_contains)
@@ -136,6 +159,20 @@ def main() -> int:
     vad = voice_models.create_vad()
     asr = voice_models.create_asr()
     tts = None if args.no_tts else voice_models.create_tts()
+
+    # The agent is opt-in. A missing key is a hard, explicit failure rather than a
+    # silent fallback, because pretending to control devices is worse than not
+    # starting at all.
+    agent = None
+    if agent_requested:
+        agent = agent_session.create_agent_session(
+            agent_api_key,
+            args.service_url,
+            deadline_seconds=args.agent_deadline,
+            max_tool_rounds=args.agent_max_tool_rounds,
+        )
+        print(f"agent: {config.agent_model()} -> {args.service_url}")
+
     if args.startup_check:
         print("startup check OK: devices and all requested models initialized")
         return 0
@@ -207,6 +244,8 @@ def main() -> int:
                     vad.reset()
                     pre_roll.clear()
                     utterance.clear()
+                    if agent is not None:
+                        agent.reset()
                 try:
                     block = audio_queue.get(timeout=0.1)
                 except queue.Empty:
@@ -271,16 +310,44 @@ def main() -> int:
                             log_event("exit_command", state="standby", transcript=transcript)
                             state = "standby"
                             kws_stream = kws.create_stream()
+                            if agent is not None:
+                                # Leaving the active session drops context and any
+                                # pending target, so "再低一度" cannot leak across.
+                                agent.reset()
                         elif transcript:
-                            def play_fixed_reply() -> None:
+                            reply_text = config.FIXED_REPLY_TEXT
+                            if agent is not None:
+                                agent_started = time.perf_counter()
+                                try:
+                                    agent_reply = agent.handle(transcript)
+                                    reply_text = agent_reply.text
+                                    print(f"[agent] {reply_text}")
+                                    log_event(
+                                        "agent_reply",
+                                        state=state,
+                                        ok=agent_reply.ok,
+                                        error_code=agent_reply.error_code,
+                                        tools=[result.name for result in agent_reply.tool_results],
+                                        seconds=round(time.perf_counter() - agent_started, 3),
+                                    )
+                                except Exception as exc:
+                                    # Never let an agent crash kill the voice loop.
+                                    reply_text = "语音助手出现异常，请稍后再试。"
+                                    print(f"[agent error] {type(exc).__name__}", file=sys.stderr)
+                                    log_event(
+                                        "agent_error", state=state, error_type=type(exc).__name__
+                                    )
+
+                            def play_reply() -> None:
                                 if tts is None:
+                                    print(f"[reply] {reply_text}")
                                     return
                                 # Do not echo the transcript: it could contain a wake word.
                                 tts_started = time.perf_counter()
-                                reply, sr = voice_models.synthesize(tts, "收到。", args.speaker_id)
+                                reply, sr = voice_models.synthesize(tts, reply_text, args.speaker_id)
                                 synth_seconds = time.perf_counter() - tts_started
                                 print("[tts] 播放期间暂停识别")
-                                log_event("tts_start", state=state, text="收到。", synth_seconds=round(synth_seconds, 3))
+                                log_event("tts_start", state=state, text=reply_text, synth_seconds=round(synth_seconds, 3))
 
                                 def record_first_output(portaudio_latency: float) -> None:
                                     submitted = time.perf_counter() - tts_started
@@ -295,15 +362,12 @@ def main() -> int:
 
                                 play(reply, sr, output_target, record_first_output)
                                 print("[tts] 播放结束，恢复识别")
-                                log_event("tts_end", state=state, text="收到。")
+                                log_event("tts_end", state=state, text=reply_text)
 
                             # Processing and playback do not consume the user's
                             # waiting window. The full timeout starts now, after
-                            # the fixed reply has completed.
-                            active_deadline = deadline_after_reply(
-                                args.idle_timeout,
-                                play_fixed_reply if tts is not None else None,
-                            )
+                            # the reply has completed.
+                            active_deadline = deadline_after_reply(args.idle_timeout, play_reply)
                     except Exception as exc:
                         # A model/playback failure must not leave recognition
                         # permanently disabled. Start a fresh waiting window

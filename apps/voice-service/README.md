@@ -17,6 +17,65 @@ The local Kokoro model remains available as an optional backend
 Models are stored outside the repository. On this machine the default root is
 `D:\smart-home-models`; override it with `SMART_HOME_MODELS_DIR`.
 
+## Voice Agent (cloud LLM + real device control)
+
+With `--agent`, a transcript is sent to a cloud LLM (DeepSeek, OpenAI-compatible)
+which may call four **restricted** tools on the local `home-service`:
+
+| Tool | Effect |
+| --- | --- |
+| `query_room_status` | rooms, devices, room temperature |
+| `query_device_status` | one device's current state |
+| `set_light` | `on`, `brightness` 0–100 |
+| `set_ac` | `on`, `mode` (`off`/`cool`/`fan_only`), `target_temp` 16–30 |
+
+Without `--agent` the loop keeps its original behaviour and touches no device.
+
+### Configure the key
+
+The key lives in a local **git-ignored** file — never in the repository, a log,
+or a command line:
+
+```powershell
+New-Item -ItemType Directory -Force runtime\voice-agent | Out-Null
+Set-Content runtime\voice-agent\agent.env "DEEPSEEK_API_KEY=<your-key>"
+```
+
+`DEEPSEEK_API_KEY` in the environment overrides the file. If the agent is
+requested but no key is configured, the loop exits with code 2 **before** loading
+any model, rather than silently falling back to a fixed reply.
+
+Override the rest with `SMART_HOME_AGENT_MODEL`, `SMART_HOME_AGENT_BASE_URL`,
+`SMART_HOME_SERVICE_URL`, `SMART_HOME_AGENT_TIMEOUT`, `SMART_HOME_AGENT_DEADLINE`
+and `SMART_HOME_AGENT_MAX_TOOL_ROUNDS`.
+
+### Run
+
+```powershell
+# Text-driven acceptance: real LLM + real home-service, no microphone.
+.\.venv\Scripts\python.exe tools/voice-check/agent_acceptance.py
+
+# Full voice loop with the agent.
+.\.venv\Scripts\python.exe apps/voice-service/src/loop.py --agent
+```
+
+Or set `SMART_HOME_AGENT=1` to enable the agent without the flag.
+
+### Honesty rules the agent follows
+
+- **Tool results, not model prose, decide what is spoken.** If any write failed,
+  the model's sentence is discarded, so a hallucinated "已经打开了" can never be
+  spoken aloud.
+- A `confirmation_timeout` is spoken as "已提交但没有确认到设备状态" — neither
+  success nor failure.
+- Device ids come from a closed enum, so the model cannot invent a device or a
+  path. Writes carry a locally generated `operation_id`; a repeated identical
+  write inside one request replays instead of commanding twice.
+- The tool loop is bounded (4 rounds, 20 s), and the conversation context is
+  bounded and cleared when the session returns to standby, so "再低一度" cannot
+  leak across sessions.
+- Only the transcript text is uploaded; audio never leaves the machine.
+
 ## Environment
 
 ```powershell

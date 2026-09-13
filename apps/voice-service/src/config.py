@@ -199,3 +199,77 @@ def kws_paths() -> dict:
 
 def vad_model() -> Path:
     return require(models_dir() / VAD_MODEL)
+
+
+# ---------------------------------------------------------------- voice agent
+# The agent's LLM key lives in a local git-ignored file (or the environment).
+# It is never written to logs, exceptions, the repository, or a command line.
+DEFAULT_AGENT_ENV_FILE = Path("runtime/voice-agent/agent.env")
+DEFAULT_AGENT_BASE_URL = "https://api.deepseek.com"
+DEFAULT_AGENT_MODEL = "deepseek-chat"
+DEFAULT_AGENT_TIMEOUT_SECONDS = 20.0
+DEFAULT_AGENT_DEADLINE_SECONDS = 20.0
+DEFAULT_AGENT_MAX_TOOL_ROUNDS = 4
+DEFAULT_HOME_SERVICE_URL = "http://127.0.0.1:8765"
+FIXED_REPLY_TEXT = "收到。"
+
+
+def agent_env_file() -> Path:
+    raw = os.environ.get("SMART_HOME_AGENT_ENV_FILE")
+    return Path(raw) if raw else DEFAULT_AGENT_ENV_FILE
+
+
+def agent_api_key() -> str:
+    """Return the LLM key from the environment, else from the local env file."""
+    value = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if value:
+        return value
+    path = agent_env_file()
+    if not path.exists():
+        return ""
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        key, separator, raw = line.partition("=")
+        if separator and key.strip() == "DEEPSEEK_API_KEY":
+            return raw.strip().strip("\"'")
+    return ""
+
+
+def agent_enabled() -> bool:
+    raw = os.environ.get("SMART_HOME_AGENT", "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def agent_base_url() -> str:
+    return os.environ.get("SMART_HOME_AGENT_BASE_URL", DEFAULT_AGENT_BASE_URL).strip()
+
+
+def agent_model() -> str:
+    return os.environ.get("SMART_HOME_AGENT_MODEL", DEFAULT_AGENT_MODEL).strip()
+
+
+def agent_timeout_seconds() -> float:
+    return _positive_float("SMART_HOME_AGENT_TIMEOUT", DEFAULT_AGENT_TIMEOUT_SECONDS)
+
+
+def agent_deadline_seconds() -> float:
+    return _positive_float("SMART_HOME_AGENT_DEADLINE", DEFAULT_AGENT_DEADLINE_SECONDS)
+
+
+def agent_max_tool_rounds() -> int:
+    raw = os.environ.get("SMART_HOME_AGENT_MAX_TOOL_ROUNDS", "")
+    if raw.strip().isdigit() and int(raw.strip()) > 0:
+        return int(raw.strip())
+    return DEFAULT_AGENT_MAX_TOOL_ROUNDS
+
+
+def home_service_url() -> str:
+    return os.environ.get("SMART_HOME_SERVICE_URL", DEFAULT_HOME_SERVICE_URL).strip()
+
+
+def _positive_float(name: str, fallback: float) -> float:
+    raw = os.environ.get(name, "")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return value if value > 0 else fallback
