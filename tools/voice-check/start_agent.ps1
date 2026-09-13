@@ -13,6 +13,7 @@
 
 .EXAMPLE
   .\tools\voice-check\start_agent.ps1
+  .\tools\voice-check\start_agent.ps1 -Text         # type instead of speaking
   .\tools\voice-check\start_agent.ps1 -NoAgent      # voice loop without the LLM
   .\tools\voice-check\start_agent.ps1 -SkipStack    # stack already running
 #>
@@ -22,6 +23,7 @@ param(
     [int]$ServicePort = 8765,
     [switch]$SkipStack,
     [switch]$NoAgent,
+    [switch]$Text,
     [switch]$CheckOnly
 )
 
@@ -133,9 +135,15 @@ try {
         return 0
     }
 
-    Write-Host '[4/4] starting the voice loop ...'
+    if ($Text) {
+        Write-Host '[4/4] starting text mode (type instead of speaking) ...'
+    }
+    else {
+        Write-Host '[4/4] starting the voice loop ...'
+    }
     $loopArguments = @($loopScript)
     if (-not $NoAgent) { $loopArguments += '--agent' }
+    if ($Text) { $loopArguments += '--text' }
     & $python @loopArguments
     return $LASTEXITCODE
 }

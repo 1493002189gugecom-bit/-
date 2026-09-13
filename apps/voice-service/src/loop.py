@@ -112,6 +112,79 @@ def wake_tone(sample_rate: int = 24000) -> np.ndarray:
     return np.concatenate([first, gap, second]).astype(np.float32)
 
 
+def synthesize_reply(tts, text: str, speaker_id: int | None):
+    """Synthesize a reply with the arguments the configured backend accepts.
+
+    Only the local Kokoro backend takes a speaker id; the Edge backend encodes the
+    voice in its own configuration. Passing a speaker id to Edge raises, which
+    silently turned every spoken reply into a caught error.
+    """
+    if tts.provider == "kokoro":
+        return voice_models.synthesize(tts, text, speaker_id)
+    return voice_models.synthesize(tts, text)
+
+
+def run_text_session(agent, tts, output_target, args, log_event, log_handle) -> int:
+    """Type sentences instead of speaking them.
+
+    This exists because the wake word has never been validated on real speech, so
+    a microphone problem must not be the only way to try the agent. Everything
+    after the transcript — tools, confirmation, honest wording, TTS — is the same
+    code path as the voice loop.
+    """
+    if agent is None:
+        print("--text requires --agent (or SMART_HOME_AGENT=1)", file=sys.stderr)
+        return 2
+
+    print('文字模式：直接输入一句话，例如「打开客厅灯」「我出门了」。输入「退出」结束。')
+    log_event("text_session_start", state="active")
+    try:
+        while True:
+            try:
+                line = input("你说> ").strip()
+            except EOFError:
+                print()
+                break
+            if not line:
+                continue
+            if should_exit(line) or line in {"退出", "结束", "quit", "exit"}:
+                print("[exit] 结束")
+                log_event("text_session_end", state="standby", transcript=line)
+                break
+
+            started = time.perf_counter()
+            try:
+                reply = agent.handle(line)
+            except Exception as exc:  # noqa: BLE001 - a crash must not end the session
+                reply_text = "语音助手出现异常，请稍后再试。"
+                print(f"[agent error] {type(exc).__name__}", file=sys.stderr)
+                log_event("agent_error", state="active", error_type=type(exc).__name__)
+            else:
+                reply_text = reply.text
+                log_event(
+                    "agent_reply",
+                    state="active",
+                    ok=reply.ok,
+                    error_code=reply.error_code,
+                    tools=[result.name for result in reply.tool_results],
+                    seconds=round(time.perf_counter() - started, 3),
+                )
+            print(f"小屋> {reply_text}")
+            if tts is not None:
+                try:
+                    audio, rate = synthesize_reply(tts, reply_text, args.speaker_id)
+                    play(audio, rate, output_target)
+                except Exception as exc:  # noqa: BLE001 - keep the text visible
+                    print(f"[tts error] {type(exc).__name__}", file=sys.stderr)
+                    log_event("tts_error", state="active", error_type=type(exc).__name__)
+    except KeyboardInterrupt:
+        print("\nstopped")
+        log_event("keyboard_interrupt", state="active")
+    finally:
+        log_handle.close()
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--keywords-file", type=Path, default=Path("tools/voice-check/cases/wake-keywords.txt"))
@@ -131,6 +204,11 @@ def main() -> int:
     parser.add_argument("--service-url", default=config.home_service_url())
     parser.add_argument("--agent-deadline", type=float, default=config.agent_deadline_seconds())
     parser.add_argument("--agent-max-tool-rounds", type=int, default=config.agent_max_tool_rounds())
+    parser.add_argument(
+        "--text",
+        action="store_true",
+        help="type instead of speaking: skips wake word, VAD and ASR (needs --agent)",
+    )
     args = parser.parse_args()
 
     # Validate the agent configuration before loading any model, so a missing key
@@ -153,11 +231,17 @@ def main() -> int:
     if output_target:
         print(f"output: {output_target.describe()}")
     print(f"model root: {config.models_dir()}")
-    print("loading KWS/VAD/ASR" + (" ..." if args.no_tts else "/TTS ..."))
+    if args.text:
+        print("text mode: microphone and speech models are not used"
+              + ("" if args.no_tts else "; loading TTS"))
+    else:
+        print("loading KWS/VAD/ASR" + (" ..." if args.no_tts else "/TTS ..."))
 
-    kws = voice_models.create_kws(args.keywords_file)
-    vad = voice_models.create_vad()
-    asr = voice_models.create_asr()
+    # Text mode never touches the microphone, so the speech models are skipped and
+    # startup stays fast.
+    kws = None if args.text else voice_models.create_kws(args.keywords_file)
+    vad = None if args.text else voice_models.create_vad()
+    asr = None if args.text else voice_models.create_asr()
     tts = None if args.no_tts else voice_models.create_tts()
 
     # The agent is opt-in. A missing key is a hard, explicit failure rather than a
@@ -187,6 +271,9 @@ def main() -> int:
             **fields,
         }
         log_handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    if args.text:
+        return run_text_session(agent, tts, output_target, args, log_event, log_handle)
 
     audio_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=128)
     accept_input = True
@@ -351,7 +438,7 @@ def main() -> int:
                                     return
                                 # Do not echo the transcript: it could contain a wake word.
                                 tts_started = time.perf_counter()
-                                reply, sr = voice_models.synthesize(tts, reply_text, args.speaker_id)
+                                reply, sr = synthesize_reply(tts, reply_text, args.speaker_id)
                                 synth_seconds = time.perf_counter() - tts_started
                                 print("[tts] 播放期间暂停识别")
                                 log_event("tts_start", state=state, text=reply_text, synth_seconds=round(synth_seconds, 3))
