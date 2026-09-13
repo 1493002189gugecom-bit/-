@@ -52,6 +52,15 @@ is validated at startup, so a typo fails there rather than when you say the phra
 house is off. Each device is confirmed individually, and a device that failed is
 left untouched.
 
+### Ending the conversation
+
+The model decides when the user is done, through the `end_conversation` tool, and
+the loop returns to standby after the farewell is spoken. A keyword list in the
+loop would always miss something — "我先去忙了" is not on any list. Unmistakable
+phrases ("退出", "结束对话") remain a hard fallback for when the model is
+unavailable, but they are checked *after* the agent so a goodbye can still be
+answered out loud.
+
 Without `--agent` the loop keeps its original behaviour and touches no device.
 
 ### Configure the key

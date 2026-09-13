@@ -112,7 +112,14 @@ def test_tool_surface_is_derived_from_the_catalog():
     schemas, by_kind = build_tool_schemas(CATALOG)
     names = [schema["function"]["name"] for schema in schemas]
 
-    assert names == ["query_room_status", "query_device_status", "set_light", "set_ac", "set_switch"]
+    assert names == [
+        "query_room_status",
+        "query_device_status",
+        "set_light",
+        "set_ac",
+        "set_switch",
+        "end_conversation",
+    ]
     assert by_kind == {
         "set_light": ["living_room_light"],
         "set_ac": ["bedroom_ac"],
@@ -120,6 +127,8 @@ def test_tool_surface_is_derived_from_the_catalog():
     }
     # The read-only sensor is queryable but never controllable.
     assert "indoor_temperature" not in [item for ids in by_kind.values() for item in ids]
+    # Ending the conversation is always available, scene list or not.
+    assert "end_conversation" in names
 
 
 def test_a_new_device_in_the_catalog_becomes_controllable_without_code_changes():
@@ -149,6 +158,7 @@ def test_every_control_kind_maps_to_a_declared_tool_name():
         "set_ac",
         "set_switch",
         "run_scene",
+        "end_conversation",
     }
 
 

@@ -13,6 +13,7 @@ from typing import Any
 
 from agent_client import AgentClient, AgentError, ChatResponse, ToolCall
 from agent_tools import (
+    END_TOOL,
     WRITE_TOOLS,
     HomeToolExecutor,
     ToolResult,
@@ -23,12 +24,16 @@ from agent_tools import (
 DEFAULT_MAX_TOOL_ROUNDS = 4
 DEFAULT_DEADLINE_SECONDS = 20.0
 DEFAULT_MAX_MESSAGES = 12
+# Spoken when the model closes the session without producing any words.
+FAREWELL_TEXT = "好的，有需要随时喊我。"
 
 SYSTEM_PROMPT = (
     "你是一个中文家庭语音助手，负责通过提供的工具控制家里的设备。"
     "只能操作工具允许的设备，不得编造设备状态，也不要声称控制列表以外的设备。"
     "如果用户表达含糊或缺少必要信息，先用一句话追问。"
     "设备操作结果以工具返回为准，不要说工具没有报告的成功。"
+    "当用户表达告别或结束对话的意图（再见、拜拜、不聊了、我先去忙、回头再说等），"
+    "调用 end_conversation 工具并简短告别，不要挽留、不要反问、不要再发起新话题。"
     "回复要口语化、简短，适合直接朗读，不要使用列表或 Markdown。"
 )
 
@@ -66,6 +71,10 @@ class AgentReply:
     ok: bool
     error_code: str | None = None
     tool_results: list[ToolResult] = field(default_factory=list)
+    # True when the model judged that the user wants to stop talking. The loop
+    # returns to standby after speaking, so "再见" ends the session instead of
+    # starting a chat about goodbyes.
+    end_conversation: bool = False
 
     @property
     def wrote_device(self) -> bool:
@@ -108,6 +117,7 @@ class AgentSession:
         deadline = self.clock() + self.deadline_seconds
         collected: list[ToolResult] = []
         write_operations: dict[str, str] = {}
+        ending = False
 
         # One extra iteration beyond the tool budget so the model always gets a
         # chance to answer in words after its last tool result.
@@ -121,7 +131,7 @@ class AgentSession:
                 return self._fail(exc.code, collected)
 
             if not response.wants_tools:
-                text = self._final_text(response, collected)
+                text = self._final_text(response, collected, ending=ending)
                 self.history.append({"role": "assistant", "content": text})
                 self._trim()
                 # `ok` reports whether the house actually changed, not merely that
@@ -129,12 +139,18 @@ class AgentSession:
                 # logs instead of only in the spoken sentence.
                 writes = [result for result in collected if result.name in WRITE_TOOLS]
                 return AgentReply(
-                    text=text, ok=all(result.ok for result in writes), tool_results=collected
+                    text=text,
+                    ok=all(result.ok for result in writes),
+                    tool_results=collected,
+                    end_conversation=ending,
                 )
 
             if round_index >= self.max_tool_rounds:
                 # The tool budget is spent and the model still wants more.
                 break
+
+            if any(call.name == END_TOOL for call in response.tool_calls):
+                ending = True
 
             # The assistant turn that requested the tools must be echoed back
             # before any tool result: OpenAI-compatible APIs reject a `tool`
@@ -185,7 +201,9 @@ class AgentSession:
                 write_operations[key] = operation_id
         return self.executor.execute(call.name, call.arguments, operation_id)
 
-    def _final_text(self, response: ChatResponse, collected: list[ToolResult]) -> str:
+    def _final_text(
+        self, response: ChatResponse, collected: list[ToolResult], *, ending: bool = False
+    ) -> str:
         writes = [result for result in collected if result.name in WRITE_TOOLS]
         failed = [result for result in writes if not result.ok]
         if failed:
@@ -195,6 +213,10 @@ class AgentSession:
         content = (response.content or "").strip()
         if content:
             return content
+        if ending:
+            # The model asked to close the session without words; never end in
+            # silence, which would look like a crash.
+            return FAREWELL_TEXT
         if writes:
             return "；".join(result.phrase or result.message or "已完成" for result in writes)
         summary = summarize_queries(collected)

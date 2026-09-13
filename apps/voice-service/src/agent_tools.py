@@ -23,12 +23,16 @@ TOOL_KIND_BY_TYPE = {"light": "set_light", "ac": "set_ac", "switch": "set_switch
 CONTROL_KINDS = ("set_light", "set_ac", "set_switch")
 READ_TOOLS = ("query_room_status", "query_device_status")
 SCENE_TOOL = "run_scene"
+END_TOOL = "end_conversation"
 # Tools that change the house. Their results, not the model's prose, decide what
 # the user is told.
 WRITE_TOOLS = CONTROL_KINDS + (SCENE_TOOL,)
+# Ends the listening session. Intent belongs to the model, not to a keyword list
+# in the loop, because no list survives "不聊了" or "我先去忙了".
+SESSION_TOOLS = (END_TOOL,)
 # Every tool this agent may ever expose. The concrete surface is a subset chosen
 # by the catalog, never a different set of names.
-HOME_TOOL_NAMES = READ_TOOLS + WRITE_TOOLS
+HOME_TOOL_NAMES = READ_TOOLS + WRITE_TOOLS + SESSION_TOOLS
 
 # Value domains, which are not device-specific.
 AC_MODES = ("off", "cool", "fan_only")
@@ -223,6 +227,21 @@ def build_tool_schemas(catalog: list[dict[str, Any]], scenes: list[dict[str, Any
                 },
             }
         )
+
+    schemas.append(
+        {
+            "type": "function",
+            "function": {
+                "name": END_TOOL,
+                "description": (
+                    "用户表示要结束这次对话时调用：说再见、拜拜、晚安、不聊了、"
+                    "我先去忙、回头再说等任何告别或结束意图。调用后助手会停止聆听。"
+                    "只在与用户的对话确实要结束时调用，不要因为一句普通的结束语就调用。"
+                ),
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            },
+        }
+    )
     return schemas, devices_by_kind
 
 
@@ -234,6 +253,7 @@ _ALLOWED_ARGUMENTS = {
     "set_ac": {"device_id", "on", "mode", "target_temp"},
     "set_switch": {"device_id", "on"},
     SCENE_TOOL: {"scene_id"},
+    END_TOOL: set(),
 }
 
 
@@ -296,6 +316,8 @@ def normalize_arguments(
     known = list(known_ids or [])
 
     normalized: dict[str, Any] = {}
+    if name == END_TOOL:
+        return {}
     if name == SCENE_TOOL:
         scene_id = _optional_text("scene_id", arguments.get("scene_id"))
         scenes = list(scene_ids or [])
@@ -450,6 +472,10 @@ class HomeToolExecutor:
         if name == "query_room_status":
             query = {"room": normalized["room"]} if "room" in normalized else None
             status, body = self._request("GET", "/tool/room_status", query, None)
+        elif name == END_TOOL:
+            # Ending the conversation is a local decision: the house service has
+            # nothing to do with it, so no request is made.
+            return ToolResult(name=name, ok=True, phrase="结束对话")
         elif name == "query_device_status":
             # home-service names these query parameters `device`/`room`; sending
             # `device_id` silently returned every device instead of one.

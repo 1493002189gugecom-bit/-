@@ -70,7 +70,12 @@ def enqueue_if_enabled(q: queue.Queue, block: np.ndarray, enabled: bool) -> bool
 
 
 def should_exit(transcript: str) -> bool:
-    return "退出" in transcript or "结束对话" in transcript
+    """Last-resort exit words.
+
+    The agent decides intent through the ``end_conversation`` tool; this covers
+    the case where the model is unavailable but the phrase is unmistakable.
+    """
+    return any(word in transcript for word in ("退出", "结束对话", "再见", "拜拜"))
 
 
 def drain(q: queue.Queue) -> None:
@@ -147,12 +152,15 @@ def run_text_session(agent, tts, output_target, args, log_event, log_handle) -> 
                 break
             if not line:
                 continue
-            if should_exit(line) or line in {"退出", "结束", "quit", "exit"}:
+            if line in {"退出", "结束", "结束对话", "quit", "exit"}:
+                # A literal quit command stays available as a hard escape hatch;
+                # farewells like "再见" go to the model, which decides intent.
                 print("[exit] 结束")
                 log_event("text_session_end", state="standby", transcript=line)
                 break
 
             started = time.perf_counter()
+            reply = None
             try:
                 reply = agent.handle(line)
             except Exception as exc:  # noqa: BLE001 - a crash must not end the session
@@ -166,6 +174,7 @@ def run_text_session(agent, tts, output_target, args, log_event, log_handle) -> 
                     state="active",
                     ok=reply.ok,
                     error_code=reply.error_code,
+                    end_conversation=reply.end_conversation,
                     tools=[result.name for result in reply.tool_results],
                     seconds=round(time.perf_counter() - started, 3),
                 )
@@ -177,6 +186,10 @@ def run_text_session(agent, tts, output_target, args, log_event, log_handle) -> 
                 except Exception as exc:  # noqa: BLE001 - keep the text visible
                     print(f"[tts error] {type(exc).__name__}", file=sys.stderr)
                     log_event("tts_error", state="active", error_type=type(exc).__name__)
+            if reply is not None and reply.end_conversation:
+                print("[exit] 对话已结束")
+                log_event("text_session_end", state="standby", reason="agent_end_conversation")
+                break
     except KeyboardInterrupt:
         print("\nstopped")
         log_event("keyboard_interrupt", state="active")
@@ -399,28 +412,26 @@ def main() -> int:
                         asr_seconds = time.perf_counter() - t0
                         print(f"[asr {asr_seconds:.2f}s] {transcript or '<empty>'}")
                         log_event("asr", state=state, transcript=transcript, seconds=round(asr_seconds, 3))
-                        if should_exit(transcript):
-                            print("[exit] 回到待唤醒")
-                            log_event("exit_command", state="standby", transcript=transcript)
-                            state = "standby"
-                            kws_stream = kws.create_stream()
-                            if agent is not None:
-                                # Leaving the active session drops context and any
-                                # pending target, so "再低一度" cannot leak across.
-                                agent.reset()
-                        elif transcript:
+                        # The agent decides intent, including whether the user is
+                        # saying goodbye, so it must run before the keyword
+                        # fallback. Matching keywords first would cut the session
+                        # off before the farewell could be spoken.
+                        if transcript and agent is not None:
                             reply_text = config.FIXED_REPLY_TEXT
+                            agent_ended_conversation = False
                             if agent is not None:
                                 agent_started = time.perf_counter()
                                 try:
                                     agent_reply = agent.handle(transcript)
                                     reply_text = agent_reply.text
+                                    agent_ended_conversation = agent_reply.end_conversation
                                     print(f"[agent] {reply_text}")
                                     log_event(
                                         "agent_reply",
                                         state=state,
                                         ok=agent_reply.ok,
                                         error_code=agent_reply.error_code,
+                                        end_conversation=agent_reply.end_conversation,
                                         tools=[result.name for result in agent_reply.tool_results],
                                         seconds=round(time.perf_counter() - agent_started, 3),
                                     )
@@ -462,6 +473,23 @@ def main() -> int:
                             # waiting window. The full timeout starts now, after
                             # the reply has completed.
                             active_deadline = deadline_after_reply(args.idle_timeout, play_reply)
+
+                            if agent_ended_conversation:
+                                # The model judged that the user said goodbye, so
+                                # stop listening now that the farewell was spoken.
+                                print("[exit] 对话已结束，回到待唤醒")
+                                log_event("agent_end_conversation", state="standby")
+                                state = "standby"
+                                kws_stream = kws.create_stream()
+                                if agent is not None:
+                                    agent.reset()
+                        elif should_exit(transcript):
+                            # Only reached without an agent: an unmistakable phrase
+                            # still has to work when the model is unavailable.
+                            print("[exit] 回到待唤醒")
+                            log_event("exit_command", state="standby", transcript=transcript)
+                            state = "standby"
+                            kws_stream = kws.create_stream()
                     except Exception as exc:
                         # A model/playback failure must not leave recognition
                         # permanently disabled. Start a fresh waiting window
