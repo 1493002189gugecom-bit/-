@@ -21,10 +21,25 @@ ONNX Runtime 加载模型、CUDA/DirectML、ffmpeg 这类 C++ 工具链在非 AS
 powershell -ExecutionPolicy Bypass -File E:\smart-home-rename\rename.ps1
 ```
 
-脚本会：停掉占用进程 → 停 HA 栈 → 改名 → 重跑 `prepare_stack.ps1` 重算生成路径
-→ 重建容器 → 逐项校验。若 DSH 仍在运行，它**不做任何改动**并退出码 2。
+脚本会：检查 DSH → 停占用进程 → 停 HA 栈 → **关停 Docker Desktop** → 改名
+→ **重启 Docker** → 重跑 `prepare_stack.ps1` 重算生成路径 → 重建容器 → 逐项校验。
 
 改名后重开 DSH，工作区选 `E:\smart-home`。
+
+### 改名为什么这么麻烦（两个隐藏持有者）
+
+| 持有者 | 症状 | 为什么难发现 |
+|---|---|---|
+| **DSH Desktop** | 改名报「另一个进程正在使用」 | 它有 8 个进程，且**不是每个命令行里都带工作区路径**，按命令行检测会漏掉 |
+| **Docker Desktop** | 改名报「**访问被拒绝**」 | 其文件共享给目录加了显式 ACE（`S-1-4-881271916-17797080`），并在共享根持有句柄 |
+
+**判定 Docker 是元凶的关键证据**：改**子目录**（`docs`）成功，改**根目录**失败。
+只 `docker compose down` 而 Docker Desktop 仍运行，句柄不会释放。
+
+**Restart Manager 查不出这两个**（实测报告 "none reported"），所以脚本改为：
+DSH 按**进程名**检测；Docker 用 `DockerCli.exe -Shutdown` 优雅关停后再改名。
+
+排查工具：`E:\smart-home-rename\who-holds.ps1`
 
 **注意**：`.venv` 里 pip/pytest 的入口 exe 仍烘焙旧绝对路径。始终用本项目既有写法
 `.\.venv\Scripts\python.exe -m <工具>`；只有需要 pip 本身时才重建 venv。
