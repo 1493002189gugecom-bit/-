@@ -1,0 +1,516 @@
+"""Home Assistant-backed restricted device queries and confirmed controls."""
+from __future__ import annotations
+
+import json
+import math
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from ha_gateway import GatewayError
+from operation_store import Operation, OperationConflict, OperationStore
+
+
+DEVICE_IDS = {
+    "living_room_light",
+    "bedroom_ac",
+    "desk_plug",
+    "indoor_temperature",
+}
+CONTROL_TOOLS = ("query_room_status", "query_device_status", "set_light", "set_ac")
+
+
+def load_catalog(path: str | Path) -> dict[str, dict[str, Any]]:
+    """Load the versioned stable-id -> Home Assistant mapping.
+
+    Every record carries its own domain, service names and confirmation
+    metadata so no caller has to guess a service name or a numeric scale.
+    """
+    value = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or set(value) != DEVICE_IDS:
+        raise ValueError("HA entity catalog must contain exactly four devices")
+    required = {
+        "entity_id",
+        "type",
+        "domain",
+        "name",
+        "room_id",
+        "room_name",
+        "services",
+        "confirmation",
+    }
+    result: dict[str, dict[str, Any]] = {}
+    for device_id, record in value.items():
+        if not isinstance(record, dict) or not required <= set(record):
+            raise ValueError(f"invalid catalog record: {device_id}")
+        if record["type"] not in {"light", "ac", "switch", "sensor"}:
+            raise ValueError(f"invalid catalog type: {device_id}")
+        if not isinstance(record["services"], dict) or not isinstance(
+            record["confirmation"], dict
+        ):
+            raise ValueError(f"invalid catalog record: {device_id}")
+        # The stable id comes from the mapping key, never from Home Assistant,
+        # so renaming an entity can never change what the Agent may ask for.
+        result[device_id] = {**record, "id": device_id}
+    return result
+
+
+def _number(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"invalid {name}")
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError(f"invalid {name}")
+    return value
+
+
+def _ha_number(value: Any, name: str) -> float:
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError:
+            raise GatewayError("backend_invalid_response") from None
+    try:
+        return _number(value, name)
+    except ValueError:
+        raise GatewayError("backend_invalid_response") from None
+
+
+def normalize_entity(record: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
+    """Convert one HA state response into the stable home-service device view."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("attributes", {}), dict):
+        raise GatewayError("backend_invalid_response")
+    ha_state = raw.get("state")
+    if not isinstance(ha_state, str):
+        raise GatewayError("backend_invalid_response")
+    attributes = raw.get("attributes", {})
+    online = ha_state not in {"unavailable", "unknown"}
+    type_ = record["type"]
+
+    if type_ == "light":
+        brightness = attributes.get("brightness")
+        if brightness is not None:
+            brightness_value = _ha_number(brightness, "brightness")
+            if not 0 <= brightness_value <= 255:
+                raise GatewayError("backend_invalid_response")
+            brightness = int(round(brightness_value * 100 / 255))
+        state = {"on": ha_state == "on", "brightness": brightness}
+    elif type_ == "ac":
+        target = attributes.get("temperature")
+        current = attributes.get("current_temperature")
+        state = {
+            "on": online and ha_state != "off",
+            "mode": ha_state,
+            "target_temp": None if target is None else _ha_number(target, "temperature"),
+            "current_temp": None if current is None else _ha_number(current, "current_temperature"),
+        }
+    elif type_ == "switch":
+        power = attributes.get("power")
+        if power is not None:
+            value = _ha_number(power, "power")
+            power = int(value) if value.is_integer() else value
+        state = {"on": ha_state == "on", "power": power}
+    else:
+        state = {"temperature": None if not online else _ha_number(ha_state, "temperature")}
+
+    return {
+        "id": record["id"],
+        "room_id": record["room_id"],
+        "room_name": record["room_name"],
+        "type": type_,
+        "name": record["name"],
+        "online": online,
+        "state": state,
+        "version": raw.get("last_updated"),
+    }
+
+
+def _error(code: str, operation_id: str | None = None, *, status: str = "rejected") -> dict[str, Any]:
+    messages = {
+        "invalid_request": "请求参数无效",
+        "not_found": "设备或房间不存在",
+        "wrong_type": "设备类型不匹配",
+        "offline": "设备当前离线",
+        "backend_unavailable": "Home Assistant 当前不可用",
+        "backend_invalid_response": "Home Assistant 返回了无效状态",
+        "backend_rejected": "Home Assistant 拒绝了请求",
+        "submission_unknown": "请求提交结果不确定",
+        "confirmation_timeout": "已提交请求，但未观察到目标状态",
+        "operation_id_conflict": "operation_id 已用于不同请求",
+    }
+    return {
+        "ok": False,
+        "data": None,
+        "error": messages.get(code, "请求失败"),
+        "error_code": code,
+        "operation_id": operation_id,
+        "status": status,
+        "phrase": None,
+    }
+
+
+def _confirmed(operation_id: str, entity: dict[str, Any], *, noop: bool) -> dict[str, Any]:
+    data = {
+        "device": entity["id"],
+        "state": entity["state"],
+        "version": entity["version"],
+        "noop": noop,
+    }
+    return {
+        "ok": True,
+        "data": data,
+        "error": None,
+        "error_code": None,
+        "operation_id": operation_id,
+        "status": "confirmed",
+        "phrase": "设备已经处于目标状态" if noop else "已从 Home Assistant 确认设备状态",
+    }
+
+
+class HAServiceApp:
+    def __init__(
+        self,
+        gateway,
+        catalog: dict[str, dict[str, Any]],
+        database: str | Path,
+        *,
+        confirmation_timeout: float = 3.0,
+        poll_interval: float = 0.1,
+        clock=time.monotonic,
+        sleep=time.sleep,
+    ):
+        self.gateway = gateway
+        self.catalog = {}
+        for device_id, record in catalog.items():
+            copied = dict(record)
+            copied["id"] = device_id
+            self.catalog[device_id] = copied
+        if set(self.catalog) != DEVICE_IDS:
+            raise ValueError("HA entity catalog must contain exactly four devices")
+        self.store = OperationStore(database)
+        self.confirmation_timeout = float(confirmation_timeout)
+        self.poll_interval = float(poll_interval)
+        self.clock = clock
+        self.sleep = sleep
+        # Serialize the whole read -> submit -> confirm cycle per device. Two
+        # concurrent writers on one device would otherwise interleave their
+        # confirmation reads and could each observe the other's state as their
+        # own success. Distinct devices stay fully parallel.
+        self._locks_guard = threading.Lock()
+        self._device_locks: dict[str, threading.RLock] = {}
+
+    def _device_lock(self, device_id: str) -> threading.RLock:
+        with self._locks_guard:
+            lock = self._device_locks.get(device_id)
+            if lock is None:
+                lock = threading.RLock()
+                self._device_locks[device_id] = lock
+            return lock
+
+    def handle(self, method: str, path: str, query: dict[str, Any], body: dict[str, Any]):
+        if method == "GET" and path == "/health":
+            return 200, {"ok": True, "backend": "ha", "tools": list(CONTROL_TOOLS)}
+        if method == "GET" and path == "/tool/device_status":
+            return self._query_devices(self._first(query, "device"), self._first(query, "room"))
+        if method == "GET" and path == "/tool/room_status":
+            return self._query_rooms(self._first(query, "room"))
+        if method == "POST" and path == "/tool/set_light":
+            return self._control("set_light", body)
+        if method == "POST" and path == "/tool/set_ac":
+            return self._control("set_ac", body)
+        return 404, {"ok": False, "error": f"no route for {method} {path}"}
+
+    @staticmethod
+    def _first(query: dict[str, Any], name: str) -> str | None:
+        value = query.get(name)
+        if isinstance(value, list):
+            return value[0] if value else None
+        return value
+
+    def _read(self, device_id: str) -> dict[str, Any]:
+        record = self.catalog[device_id]
+        return normalize_entity(record, self.gateway.read(record["entity_id"]))
+
+    @staticmethod
+    def _gateway_status(code: str) -> int:
+        return 503 if code in {"backend_unavailable", "backend_invalid_response"} else 400
+
+    def _query_devices(self, device: str | None, room: str | None):
+        if device is not None:
+            if device not in self.catalog:
+                return 400, _error("not_found")
+            ids = [device]
+        elif room is not None:
+            ids = self._room_device_ids(room)
+            if ids is None:
+                return 400, _error("not_found")
+        else:
+            ids = list(self.catalog)
+        try:
+            devices = [self._read(device_id) for device_id in ids]
+        except GatewayError as exc:
+            return self._gateway_status(exc.code), _error(exc.code)
+        return 200, {"ok": True, "data": {"devices": devices}, "error": None, "error_code": None}
+
+    def _room_device_ids(self, room: str) -> list[str] | None:
+        ids = [
+            device_id for device_id, item in self.catalog.items()
+            if room in {item["room_id"], item["room_name"]}
+        ]
+        return ids or None
+
+    def _query_rooms(self, room: str | None):
+        rooms: list[tuple[str, str]] = []
+        for item in self.catalog.values():
+            pair = (item["room_id"], item["room_name"])
+            if pair not in rooms and (room is None or room in pair):
+                rooms.append(pair)
+        if not rooms:
+            return 400, _error("not_found")
+        payload = []
+        try:
+            for room_id, room_name in rooms:
+                devices = [
+                    self._read(device_id) for device_id, item in self.catalog.items()
+                    if item["room_id"] == room_id
+                ]
+                temperatures = [
+                    device["state"].get("temperature") for device in devices
+                    if device["type"] == "sensor" and device["online"]
+                ]
+                payload.append({
+                    "id": room_id,
+                    "name": room_name,
+                    "simulated_temp": temperatures[0] if temperatures else None,
+                    "devices": devices,
+                })
+        except GatewayError as exc:
+            return self._gateway_status(exc.code), _error(exc.code)
+        return 200, {"ok": True, "data": {"rooms": payload}, "error": None, "error_code": None}
+
+    def _normalize_request(self, kind: str, body: dict[str, Any]):
+        if not isinstance(body, dict):
+            raise ValueError("body")
+        allowed = (
+            {"device_id", "operation_id", "on", "brightness"}
+            if kind == "set_light"
+            else {"device_id", "operation_id", "on", "mode", "target_temp"}
+        )
+        if set(body) - allowed:
+            raise ValueError("unknown fields")
+        operation_id = body.get("operation_id")
+        device_id = body.get("device_id")
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            raise ValueError("operation_id")
+        if not isinstance(device_id, str) or not device_id:
+            raise ValueError("device_id")
+
+        params: dict[str, Any] = {}
+        if "on" in body:
+            if not isinstance(body["on"], bool):
+                raise ValueError("on")
+            params["on"] = body["on"]
+
+        if kind == "set_light":
+            if "brightness" in body:
+                brightness = body["brightness"]
+                if isinstance(brightness, bool) or not isinstance(brightness, int) or not 0 <= brightness <= 100:
+                    raise ValueError("brightness")
+                params["brightness"] = brightness
+            if not params or (params.get("on") is False and "brightness" in params):
+                raise ValueError("light params")
+            target = dict(params)
+            if "brightness" in params:
+                target["on"] = True
+        else:
+            if "mode" in body:
+                mode = body["mode"]
+                if mode not in {"off", "cool", "fan_only"}:
+                    raise ValueError("mode")
+                params["mode"] = mode
+            if "target_temp" in body:
+                target_temp = _number(body["target_temp"], "target_temp")
+                if not 16 <= target_temp <= 30:
+                    raise ValueError("target_temp")
+                params["target_temp"] = target_temp
+            if not params:
+                raise ValueError("ac params")
+            if params.get("on") is False and params.get("mode") not in {None, "off"}:
+                raise ValueError("conflicting mode")
+            if params.get("on") is True and params.get("mode") == "off":
+                raise ValueError("conflicting mode")
+            target = dict(params)
+            if params.get("on") is False or params.get("mode") == "off":
+                target = {key: value for key, value in target.items() if key != "on"}
+                target["on"] = False
+                target["mode"] = "off"
+            elif "mode" in params:
+                target["on"] = True
+        return operation_id, device_id, params, target
+
+    def _control(self, kind: str, body: dict[str, Any]):
+        try:
+            operation_id, device_id, params, target = self._normalize_request(kind, body)
+        except (ValueError, TypeError):
+            candidate = body.get("operation_id") if isinstance(body, dict) else None
+            return 400, _error("invalid_request", candidate if isinstance(candidate, str) else None)
+
+        # Holding the device lock across reserve and execution means a retry
+        # with the same operation id replays the finished outcome instead of
+        # racing the original request.
+        with self._device_lock(device_id):
+            try:
+                reservation = self.store.reserve(operation_id, kind, device_id, params, target)
+            except OperationConflict:
+                return 409, _error("operation_id_conflict", operation_id)
+            if not reservation.created:
+                return self._stored_result(reservation.operation)
+
+            expected_type = "light" if kind == "set_light" else "ac"
+            record = self.catalog.get(device_id)
+            if record is None:
+                return self._reject(reservation.operation, "not_found")
+            if record["type"] != expected_type:
+                return self._reject(reservation.operation, "wrong_type")
+            return self._execute_accepted(reservation.operation)
+
+    def _stored_result(self, operation: Operation):
+        if isinstance(operation.result, dict):
+            return self._replay_status(operation), operation.result
+        return 202, {
+            "ok": False,
+            "data": None,
+            "error": "操作仍在处理中",
+            "error_code": None,
+            "operation_id": operation.id,
+            "status": operation.status,
+            "phrase": None,
+        }
+
+    @staticmethod
+    def _replay_status(operation: Operation) -> int:
+        """Replay a stored outcome with the same HTTP status as the first reply."""
+        if operation.result.get("ok"):
+            return 200
+        # An unconfirmed outcome is not a client error: the request may still
+        # be executing on the device, so it must replay as 202 like the original.
+        if operation.status == "unconfirmed":
+            return 202
+        code = operation.result.get("error_code")
+        if code == "operation_id_conflict":
+            return 409
+        if code in {"backend_unavailable", "backend_invalid_response"}:
+            return 503
+        return 400
+
+    def _reject(self, operation: Operation, code: str):
+        result = _error(code, operation.id)
+        updated = self.store.transition(
+            operation.id, "rejected", result=result, error_code=code, error=result["error"]
+        )
+        return self._gateway_status(code), updated.result
+
+    def _finish_unconfirmed(self, operation: Operation, code: str):
+        result = _error(code, operation.id, status="unconfirmed")
+        updated = self.store.transition(
+            operation.id, "unconfirmed", result=result, error_code=code, error=result["error"]
+        )
+        return 202, updated.result
+
+    def _finish_confirmed(self, operation: Operation, entity: dict[str, Any], *, noop: bool):
+        result = _confirmed(operation.id, entity, noop=noop)
+        updated = self.store.transition(operation.id, "confirmed", result=result)
+        return 200, updated.result
+
+    @staticmethod
+    def _matches(entity: dict[str, Any], target: dict[str, Any]) -> bool:
+        return all(entity["state"].get(key) == value for key, value in target.items())
+
+    def _execute_accepted(self, operation: Operation):
+        try:
+            entity = self._read(operation.target_id)
+        except GatewayError as exc:
+            return self._reject(operation, exc.code)
+        if not entity["online"]:
+            return self._reject(operation, "offline")
+        if self._matches(entity, operation.target):
+            return self._finish_confirmed(operation, entity, noop=True)
+
+        submitted = self.store.transition(operation.id, "submitted")
+        completed_calls = 0
+        try:
+            for domain, service, data in self._service_calls(submitted):
+                self.gateway.call(domain, service, data)
+                completed_calls += 1
+        except GatewayError as exc:
+            if exc.may_have_submitted or completed_calls:
+                code = exc.code if exc.may_have_submitted else "submission_unknown"
+                return self._finish_unconfirmed(submitted, code)
+            return self._reject(submitted, exc.code)
+        return self._confirm_until_deadline(submitted)
+
+    def _service_calls(self, operation: Operation):
+        """Build service calls from the catalog, never from guessed names."""
+        record = self.catalog[operation.target_id]
+        entity_id = record["entity_id"]
+        domain = record["domain"]
+        services = record["services"]
+        params = operation.params
+        if operation.kind == "set_light":
+            if params.get("on") is False:
+                return [(domain, services["off"], {"entity_id": entity_id})]
+            data = {"entity_id": entity_id}
+            if "brightness" in params:
+                data["brightness_pct"] = params["brightness"]
+            return [(domain, services["on"], data)]
+
+        calls = []
+        default_mode = record["confirmation"].get("default_mode")
+        mode = params.get("mode")
+        if params.get("on") is False:
+            mode = "off"
+        elif params.get("on") is True and mode is None:
+            mode = default_mode
+        if mode is not None:
+            calls.append((domain, services["mode"], {"entity_id": entity_id, "hvac_mode": mode}))
+        if "target_temp" in params:
+            calls.append((domain, services["temperature"], {
+                "entity_id": entity_id, "temperature": params["target_temp"]
+            }))
+        return calls
+
+    def _confirm_until_deadline(self, operation: Operation):
+        deadline = self.clock() + self.confirmation_timeout
+        while True:
+            try:
+                entity = self._read(operation.target_id)
+            except GatewayError:
+                entity = None
+            if entity is not None and entity["online"] and self._matches(entity, operation.target):
+                return self._finish_confirmed(operation, entity, noop=False)
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                return self._finish_unconfirmed(operation, "confirmation_timeout")
+            self.sleep(min(self.poll_interval, remaining))
+
+    def reconcile_unfinished(self):
+        """Resolve operations left behind by a crash, per the approved semantics.
+
+        ``accepted`` may still be safely submitted once because it proves nothing
+        was sent. ``submitted`` and ``unconfirmed`` may only be reconciled
+        against observed state: a blind resend could actuate a device twice.
+        """
+        for operation in self.store.unfinished():
+            with self._device_lock(operation.target_id):
+                if operation.status == "accepted":
+                    self._execute_accepted(operation)
+                    continue
+                try:
+                    entity = self._read(operation.target_id)
+                except GatewayError:
+                    entity = None
+                if entity is not None and entity["online"] and self._matches(entity, operation.target):
+                    self._finish_confirmed(operation, entity, noop=False)
+                elif operation.status == "submitted":
+                    self._finish_unconfirmed(operation, "confirmation_timeout")

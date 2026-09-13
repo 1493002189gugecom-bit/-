@@ -1,0 +1,47 @@
+{
+  "living_room_light": {
+    "entity_id": "light.shv_living_room_light",
+    "type": "light",
+    "domain": "light",
+    "name": "客厅灯",
+    "room_id": "living_room",
+    "room_name": "客厅",
+    "services": {"on": "turn_on", "off": "turn_off"},
+    "confirmation": {"brightness_scale": 255}
+  },
+  "bedroom_ac": {
+    "entity_id": "climate.shv_bedroom_ac",
+    "type": "ac",
+    "domain": "climate",
+    "name": "卧室空调",
+    "room_id": "bedroom",
+    "room_name": "卧室",
+    "services": {"mode": "set_hvac_mode", "temperature": "set_temperature"},
+    "confirmation": {
+      "modes": ["off", "cool", "fan_only"],
+      "min_temp": 16,
+      "max_temp": 30,
+      "default_mode": "cool"
+    }
+  },
+  "desk_plug": {
+    "entity_id": "switch.shv_desk_plug",
+    "type": "switch",
+    "domain": "switch",
+    "name": "智能插座",
+    "room_id": "living_room",
+    "room_name": "客厅",
+    "services": {"on": "turn_on", "off": "turn_off"},
+    "confirmation": {"power_on": 60}
+  },
+  "indoor_temperature": {
+    "entity_id": "sensor.shv_indoor_temperature",
+    "type": "sensor",
+    "domain": "sensor",
+    "name": "室内温度",
+    "room_id": "living_room",
+    "room_name": "客厅",
+    "services": {},
+    "confirmation": {}
+  }
+}
