@@ -39,6 +39,17 @@ powershell -ExecutionPolicy Bypass -File E:\smart-home-rename\rename.ps1
 **Restart Manager 查不出这两个**（实测报告 "none reported"），所以脚本改为：
 DSH 按**进程名**检测；Docker 用 `DockerCli.exe -Shutdown` 优雅关停后再改名。
 
+### 兜底：搬内容而不是改根目录名
+
+即使 DSH 与 Docker 都关掉，**根目录改名仍可能报「访问被拒绝」**（实测两次）。
+但**改子目录是成功的**（在 DSH 运行中也成功），说明持有者锁的是**目录本身**而非内容。
+所以脚本在根目录改名失败时自动降级：
+
+建 `E:\smart-home` → 把旧目录下**每个子项逐个 Move** 过去（同盘移动即改名）
+→ 若旧目录已空则尝试删除，删不掉也无害。
+
+`.git` 也是子项，随之迁移，提交历史完整。
+
 排查工具：`E:\smart-home-rename\who-holds.ps1`
 
 **注意**：`.venv` 里 pip/pytest 的入口 exe 仍烘焙旧绝对路径。始终用本项目既有写法
