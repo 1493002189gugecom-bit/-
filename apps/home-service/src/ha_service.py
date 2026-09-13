@@ -255,6 +255,7 @@ class HAServiceApp:
                     "name": record["name"],
                     "room_id": record["room_id"],
                     "room_name": record["room_name"],
+                    "area_id": record.get("area_id"),
                     "capabilities": capabilities,
                     "controllable": bool(capabilities),
                 }
