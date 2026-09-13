@@ -119,6 +119,11 @@ class AgentSession:
                 # The tool budget is spent and the model still wants more.
                 break
 
+            # The assistant turn that requested the tools must be echoed back
+            # before any tool result: OpenAI-compatible APIs reject a `tool`
+            # message that has no preceding assistant `tool_calls`.
+            self.history.append(self._assistant_tool_message(response))
+
             for call in response.tool_calls:
                 result = self._run_tool(call, write_operations)
                 collected.append(result)
@@ -133,6 +138,24 @@ class AgentSession:
         return self._fail("tool_loop_exceeded", collected)
 
     # ----------------------------------------------------------------- internal
+    @staticmethod
+    def _assistant_tool_message(response: ChatResponse) -> dict[str, Any]:
+        return {
+            "role": "assistant",
+            "content": response.content,
+            "tool_calls": [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": json.dumps(call.arguments, ensure_ascii=False),
+                    },
+                }
+                for call in response.tool_calls
+            ],
+        }
+
     def _run_tool(self, call: ToolCall, write_operations: dict[str, str]) -> ToolResult:
         # A repeated identical write inside one request must replay the first
         # operation instead of commanding the device a second time.

@@ -262,6 +262,18 @@ def run(service_url, key, model, base_url):
     return report
 
 
+def emit(summary, out_path):
+    """Write the JSON summary as UTF-8 so it survives any console codepage."""
+    text = json.dumps(summary, ensure_ascii=False, indent=2)
+    if out_path:
+        target = Path(out_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text + "\n", encoding="utf-8")
+        print(f"wrote {target}")
+    else:
+        print(text)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--service-url", default=config.home_service_url())
@@ -272,6 +284,11 @@ def main():
         action="store_true",
         help="verify the device tool contract against the live backend, without any LLM",
     )
+    parser.add_argument(
+        "--out",
+        default=os.environ.get("AGENT_ACCEPTANCE_OUT"),
+        help="write the JSON summary here as UTF-8 instead of re-encoding through the console",
+    )
     args = parser.parse_args()
 
     started = time.monotonic()
@@ -279,16 +296,10 @@ def main():
         try:
             report = run_tools_only(args.service_url)
         except Exception as exc:  # noqa: BLE001 - report the class, never a secret
-            print(json.dumps({"ok": False, "error": type(exc).__name__}, ensure_ascii=False))
+            emit({"ok": False, "error": type(exc).__name__}, args.out)
             return 1
         ok = bool(report.checks) and all(check["ok"] for check in report.checks)
-        print(
-            json.dumps(
-                {"ok": ok, "seconds": round(time.monotonic() - started, 1), "checks": report.checks},
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        emit({"ok": ok, "seconds": round(time.monotonic() - started, 1), "checks": report.checks}, args.out)
         return 0 if ok else 1
 
     key = config.agent_api_key()
@@ -303,20 +314,14 @@ def main():
     try:
         report = run(args.service_url, key, args.model, args.base_url)
     except AgentError as exc:
-        print(json.dumps({"ok": False, "error_code": exc.code}, ensure_ascii=False))
+        emit({"ok": False, "error_code": exc.code}, args.out)
         return 1
     except Exception as exc:  # noqa: BLE001 - report the class, never a secret
-        print(json.dumps({"ok": False, "error": type(exc).__name__}, ensure_ascii=False))
+        emit({"ok": False, "error": type(exc).__name__}, args.out)
         return 1
 
     ok = bool(report.checks) and all(check["ok"] for check in report.checks)
-    print(
-        json.dumps(
-            {"ok": ok, "seconds": round(time.monotonic() - started, 1), "checks": report.checks},
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
+    emit({"ok": ok, "seconds": round(time.monotonic() - started, 1), "checks": report.checks}, args.out)
     return 0 if ok else 1
 
 

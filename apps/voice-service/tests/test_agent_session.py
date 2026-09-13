@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agent_client import AgentError, ChatResponse, ToolCall
@@ -49,6 +51,32 @@ def write_call(call_id="c1", name="set_light", **arguments):
 def session(client, executor, **kwargs):
     clock = kwargs.pop("clock", FakeClock())
     return AgentSession(client, executor, clock=clock, **kwargs), clock
+
+
+def test_assistant_tool_calls_are_echoed_before_any_tool_result():
+    """Regression: OpenAI-compatible APIs reject a `tool` message that has no
+    preceding assistant `tool_calls`, which broke every real DeepSeek call."""
+    client = FakeClient([
+        ChatResponse(content=None, tool_calls=[write_call(on=True)]),
+        ChatResponse(content="已打开。"),
+    ])
+    executor = FakeExecutor()
+    agent, _ = session(client, executor)
+
+    agent.handle("打开客厅灯")
+
+    second_call = client.messages_seen[1]
+    assistant_index = next(
+        index for index, message in enumerate(second_call) if message.get("role") == "assistant"
+    )
+    tool_index = next(
+        index for index, message in enumerate(second_call) if message.get("role") == "tool"
+    )
+    assert assistant_index < tool_index
+    echoed = second_call[assistant_index]["tool_calls"][0]
+    assert echoed["function"]["name"] == "set_light"
+    assert json.loads(echoed["function"]["arguments"]) == {"device_id": "living_room_light", "on": True}
+    assert echoed["id"] == "c1"
 
 
 def test_single_tool_call_then_spoken_reply():
