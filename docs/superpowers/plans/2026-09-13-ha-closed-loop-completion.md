@@ -867,7 +867,7 @@ flow = request("POST", f"/api/config/config_entries/flow/{flow['flow_id']}", pay
 print(json.dumps({key: flow.get(key) for key in ("type", "step_id", "errors", "reason")}))
 ```
 
-If an MQTT entry exists, verify it is loaded rather than modifying it blindly.
+If an MQTT entry already exists, reconfigure it rather than returning early: POST `/api/config/config_entries/flow` with `{"handler":"mqtt","entry_id": entry_id}`; require a `broker` form, preserve broker/port/protocol from its `data_schema` defaults, and submit the new username/password to `/api/config/config_entries/flow/{flow_id}`. Accept only `type=abort, reason=reconfigure_successful`; on another form report sanitized `step_id/errors` and fail. Never edit `.storage/core.config_entries` directly. This internal API is version-sensitive, so if its response shape differs, stop and instruct the user to use Settings → Devices & services → MQTT → Reconfigure rather than deleting the entry.
 
 - [ ] **Step 2: Add an acceptance script with explicit assertions**
 
