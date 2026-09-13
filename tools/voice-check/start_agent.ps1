@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Start the whole voice-agent chain: Home Assistant stack, home-service, voice loop.
 
