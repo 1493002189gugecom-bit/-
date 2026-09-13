@@ -117,6 +117,7 @@ def test_tool_surface_is_derived_from_the_catalog():
         "query_device_status",
         "set_light",
         "set_ac",
+        "adjust_ac",
         "set_switch",
         "end_conversation",
     ]
@@ -158,6 +159,7 @@ def test_every_control_kind_maps_to_a_declared_tool_name():
         "set_ac",
         "set_switch",
         "run_scene",
+        "adjust_ac",
         "end_conversation",
     }
 
