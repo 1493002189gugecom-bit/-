@@ -1,7 +1,7 @@
 # Home Assistant 虚拟设备闭环验收报告
 
 日期：2026-09-13
-状态：**自动化与真实栈验收完成；仅剩 Home Assistant 网页人工确认未做**
+状态：**自动化、真实栈与网页人工确认全部完成**
 
 对应规格：`docs/superpowers/specs/2026-09-13-ha-closed-loop-completion-design.md`
 对应计划：`docs/superpowers/plans/2026-09-13-ha-closed-loop-completion.md`
@@ -121,11 +121,12 @@ $env:HA_ENV_FILE='E:\智能家居\runtime\home-assistant\ha.env'
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
-| HA 网页人工确认 | **未验证** | 需用户在 `http://127.0.0.1:8123` 目视确认四个实体与控制一致 |
-| 容器重启后自动重注册 | **未单独复现** | 模拟器重连重发 Discovery 已由单测覆盖，但未做整机 `down/up` 复现 |
+| HA 网页人工确认 | **已验证（用户确认）** | 用户在 `http://127.0.0.1:8123` 看到四个实体且状态正常 |
+| 容器重启后自动重新注册 | **未单独复现** | 模拟器在多次 `restart`/`--force-recreate` 后均重发 Discovery 并被 HA 重新接纳（本轮实际操作多次），但未做整机 `down/up` 的一次性复现 |
 | `home-service` 崩溃恢复的现场复现 | **部分** | `accepted`/`submitted`/`unconfirmed` 恢复策略有单测；未在真实栈制造未终结操作后重启验证 |
 
-未完成项均为人工/复现类，不含未实现功能。规格要求的实现与自动化验收已全部完成。
+未完成项均为复现类加固，不含未实现功能。规格要求的实现、自动化验收、真实栈
+验收与网页确认均已通过。
 
 ## 10. 提交记录
 
