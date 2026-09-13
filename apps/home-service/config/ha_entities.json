@@ -35,7 +35,9 @@
       ],
       "min_temp": 16,
       "max_temp": 30,
-      "default_mode": "cool"
+      "default_mode": "cool",
+      "comfort_temp": 26,
+      "temp_step": 1
     }
   },
   "desk_plug": {

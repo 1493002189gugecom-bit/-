@@ -13,6 +13,7 @@ from typing import Any
 
 from agent_client import AgentClient, AgentError, ChatResponse, ToolCall
 from agent_tools import (
+    ADJUST_TOOL,
     END_TOOL,
     WRITE_TOOLS,
     HomeToolExecutor,
@@ -32,6 +33,8 @@ SYSTEM_PROMPT = (
     "只能操作工具允许的设备，不得编造设备状态，也不要声称控制列表以外的设备。"
     "如果用户表达含糊或缺少必要信息，先用一句话追问。"
     "设备操作结果以工具返回为准，不要说工具没有报告的成功。"
+    "温度必须来自用户或本地配置：用户没说具体温度时不要自己填数字，"
+    "只说热或冷就用 adjust_ac；用户说“有点热”也要照做，不要反复追问。"
     "当用户表达告别或结束对话的意图（再见、拜拜、不聊了、我先去忙、回头再说等），"
     "调用 end_conversation 工具并简短告别，不要挽留、不要反问、不要再发起新话题。"
     "回复要口语化、简短，适合直接朗读，不要使用列表或 Markdown。"
@@ -210,6 +213,14 @@ class AgentSession:
             # Model prose is discarded entirely: it cannot be trusted to admit a
             # failure, and a false success claim is the worst possible outcome.
             return self._failure_text(failed)
+        # An adjust is described precisely by the service ("turned it on at 26"),
+        # while the model tends to narrate it as a different action ("lowered one
+        # step" even though the unit was off). Prefer the service's wording.
+        adjusted = [
+            result for result in writes if result.name == ADJUST_TOOL and result.phrase
+        ]
+        if adjusted:
+            return "；".join(result.phrase for result in adjusted)
         content = (response.content or "").strip()
         if content:
             return content

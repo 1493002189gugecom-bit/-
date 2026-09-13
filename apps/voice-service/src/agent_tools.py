@@ -23,10 +23,12 @@ TOOL_KIND_BY_TYPE = {"light": "set_light", "ac": "set_ac", "switch": "set_switch
 CONTROL_KINDS = ("set_light", "set_ac", "set_switch")
 READ_TOOLS = ("query_room_status", "query_device_status")
 SCENE_TOOL = "run_scene"
+ADJUST_TOOL = "adjust_ac"
 END_TOOL = "end_conversation"
+ADJUST_DIRECTIONS = ("cooler", "warmer")
 # Tools that change the house. Their results, not the model's prose, decide what
 # the user is told.
-WRITE_TOOLS = CONTROL_KINDS + (SCENE_TOOL,)
+WRITE_TOOLS = CONTROL_KINDS + (SCENE_TOOL, ADJUST_TOOL)
 # Ends the listening session. Intent belongs to the model, not to a keyword list
 # in the loop, because no list survives "不聊了" or "我先去忙了".
 SESSION_TOOLS = (END_TOOL,)
@@ -159,7 +161,10 @@ def build_tool_schemas(catalog: list[dict[str, Any]], scenes: list[dict[str, Any
                     "type": "function",
                     "function": {
                         "name": "set_ac",
-                        "description": "开关空调、设置模式或目标温度（16-30 度）。",
+                        "description": (
+                            "开关空调或设置模式。只有在用户明确说出温度时才传 target_temp；"
+                            "用户只说“热/冷”而没说温度时不要传，服务端会套用本地舒适温度。"
+                        ),
                         "parameters": {
                             "type": "object",
                             "properties": {
@@ -173,6 +178,35 @@ def build_tool_schemas(catalog: list[dict[str, Any]], scenes: list[dict[str, Any
                                 },
                             },
                             "required": ["device_id"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
+            # Vague thermal discomfort ("有点热", "再低一点") goes through this
+            # tool: the direction comes from the user, every number from the
+            # local comfort policy, so the model cannot invent a temperature.
+            schemas.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": ADJUST_TOOL,
+                        "description": (
+                            "用户表示热或冷但没说具体温度时使用（有点热、好热、再低一点、有点冷）。"
+                            "只会按本地设定调整一档；空调关着时 cooler 会按本地舒适温度打开。"
+                            "用户明确说了温度时改用 set_ac。"
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "device_id": _device_enum(ids, "要调整的空调"),
+                                "direction": {
+                                    "type": "string",
+                                    "enum": list(ADJUST_DIRECTIONS),
+                                    "description": "cooler 表示想更凉，warmer 表示想更暖",
+                                },
+                            },
+                            "required": ["device_id", "direction"],
                             "additionalProperties": False,
                         },
                     },
@@ -253,6 +287,7 @@ _ALLOWED_ARGUMENTS = {
     "set_ac": {"device_id", "on", "mode", "target_temp"},
     "set_switch": {"device_id", "on"},
     SCENE_TOOL: {"scene_id"},
+    ADJUST_TOOL: {"device_id", "direction"},
     END_TOOL: set(),
 }
 
@@ -318,6 +353,19 @@ def normalize_arguments(
     normalized: dict[str, Any] = {}
     if name == END_TOOL:
         return {}
+    if name == ADJUST_TOOL:
+        device_id = _optional_text("device_id", arguments.get("device_id"))
+        allowed = list((devices_by_kind or {}).get("set_ac") or [])
+        if not allowed:
+            raise ToolArgumentError("invalid_arguments", "当前没有可调整的空调")
+        if device_id not in allowed:
+            raise ToolArgumentError("invalid_arguments", f"不能调整该设备：{device_id}")
+        return {
+            "device_id": device_id,
+            "direction": _require_choice(
+                "direction", arguments.get("direction"), ADJUST_DIRECTIONS
+            ),
+        }
     if name == SCENE_TOOL:
         scene_id = _optional_text("scene_id", arguments.get("scene_id"))
         scenes = list(scene_ids or [])

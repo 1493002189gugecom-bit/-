@@ -420,16 +420,24 @@ def test_ac_mode_and_temperature_are_submitted_and_confirmed(tmp_path):
     ]
 
 
-def test_ac_on_defaults_to_cool(tmp_path):
+def test_ac_on_defaults_to_cool_at_the_local_comfort_temperature(tmp_path):
+    """No temperature in the request means the *local* default is used, so the
+    model never has to invent one."""
     gateway = FakeGateway()
     result = post(make_app(tmp_path, gateway), "/tool/set_ac", {
         "device_id": "bedroom_ac", "on": True, "operation_id": "ac-on"
     })[1]
     assert result["ok"] is True
     assert result["data"]["state"]["mode"] == "cool"
-    assert gateway.calls == [("climate", "set_hvac_mode", {
-        "entity_id": "climate.shv_bedroom_ac", "hvac_mode": "cool"
-    })]
+    assert result["data"]["state"]["target_temp"] == 26.0
+    assert gateway.calls == [
+        ("climate", "set_hvac_mode", {
+            "entity_id": "climate.shv_bedroom_ac", "hvac_mode": "cool"
+        }),
+        ("climate", "set_temperature", {
+            "entity_id": "climate.shv_bedroom_ac", "temperature": 26.0
+        }),
+    ]
 
 
 def test_ac_off_noops_when_already_off_and_submits_when_running(tmp_path):

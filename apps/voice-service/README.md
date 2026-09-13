@@ -29,6 +29,7 @@ which may call four **restricted** tools on the local `home-service`:
 | `set_light` | `on`, `brightness` 0–100 |
 | `set_ac` | `on`, `mode` (`off`/`cool`/`fan_only`), `target_temp` 16–30 |
 | `set_switch` | `on` |
+| `adjust_ac` | `direction` = `cooler`/`warmer` |
 | `run_scene` | one phrase that drives several devices |
 
 The device list and the scene list are both read from `home-service` at startup,
@@ -51,6 +52,26 @@ is validated at startup, so a typo fails there rather than when you say the phra
 "客厅灯已关闭；卧室空调已关闭；智能插座设备当前离线" — it never claims the whole
 house is off. Each device is confirmed individually, and a device that failed is
 left untouched.
+
+### Temperatures come from configuration, never from the model
+
+`apps/home-service/config/ha_entities.json` carries the AC comfort policy —
+`comfort_temp`, `temp_step`, `min_temp`, `max_temp`. The model is never the source
+of those numbers:
+
+| You say | What happens |
+| --- | --- |
+| 有点热 (AC off) | turns on cooling at `comfort_temp` |
+| 好热啊 | one `temp_step` cooler |
+| 再低一点 | one more step |
+| 有点冷 | one step warmer |
+| 空调调到 24 度 | exactly 24, because you named it |
+
+`set_ac` also fills in `comfort_temp` when the request cools without naming a
+temperature, and `adjust_ac` does the arithmetic server-side. Identical intents
+therefore behave identically, and a made-up 22 °C can no longer reach the device.
+The spoken sentence for an adjust comes from the service, because the model
+tended to narrate "turned it on at 26" as "lowered one step".
 
 ### Ending the conversation
 

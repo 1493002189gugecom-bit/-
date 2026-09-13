@@ -24,6 +24,7 @@ CONTROL_TOOLS = (
     "set_light",
     "set_ac",
     "set_switch",
+    "adjust_ac",
 )
 SCENE_TOOL = "run_scene"
 # A scene step must carry exactly the parameters its device type accepts.
@@ -46,6 +47,12 @@ CAPABILITIES = {
 # Tool kind -> the device type it may act on, and the reverse for scene steps.
 KIND_DEVICE_TYPE = {"set_light": "light", "set_ac": "ac", "set_switch": "switch"}
 DEVICE_TYPE_KIND = {device_type: kind for kind, device_type in KIND_DEVICE_TYPE.items()}
+# An AC must publish its local comfort policy: the default target, the smallest
+# sensible change, and the allowed band. The model is never the source of these
+# numbers, so they have to be configuration.
+AC_COMFORT_KEYS = ("comfort_temp", "temp_step", "min_temp", "max_temp")
+# Spoken mode names, so a phrase never says the raw Home Assistant value.
+_MODE_NAMES = {"off": "关闭", "cool": "制冷", "fan_only": "送风"}
 
 
 def load_catalog(path: str | Path) -> dict[str, dict[str, Any]]:
@@ -77,6 +84,14 @@ def load_catalog(path: str | Path) -> dict[str, dict[str, Any]]:
             record["confirmation"], dict
         ):
             raise ValueError(f"invalid catalog record: {device_id}")
+        if record["type"] == "ac":
+            missing = [key for key in AC_COMFORT_KEYS if key not in record["confirmation"]]
+            if missing:
+                # Without a local comfort policy the model would have to invent a
+                # target temperature, which the design forbids.
+                raise ValueError(
+                    f"ac record {device_id} is missing comfort settings: {', '.join(missing)}"
+                )
         # The stable id comes from the mapping key, never from Home Assistant,
         # so renaming an entity can never change what the Agent may ask for.
         result[device_id] = {**record, "id": device_id}
@@ -307,6 +322,8 @@ class HAServiceApp:
             return self._control("set_switch", body)
         if method == "POST" and path == "/tool/run_scene":
             return self._run_scene(body)
+        if method == "POST" and path == "/tool/adjust_ac":
+            return self._adjust_ac(body)
         return 404, {"ok": False, "error": f"no route for {method} {path}"}
 
     def scene_view(self) -> list[dict[str, Any]]:
@@ -463,6 +480,16 @@ class HAServiceApp:
                 raise ValueError("conflicting mode")
             if params.get("on") is True and params.get("mode") == "off":
                 raise ValueError("conflicting mode")
+
+            # The user expressed an intent to cool without naming a temperature,
+            # so the *local* comfort policy supplies it. The model never sees a
+            # number it could invent.
+            turning_on = params.get("on") is True or params.get("mode") not in (None, "off")
+            if "target_temp" not in params and turning_on:
+                record = self.catalog.get(device_id)
+                if record is not None and record["type"] == "ac":
+                    params["target_temp"] = float(record["confirmation"]["comfort_temp"])
+
             target = dict(params)
             if params.get("on") is False or params.get("mode") == "off":
                 target = {key: value for key, value in target.items() if key != "on"}
@@ -633,8 +660,12 @@ class HAServiceApp:
         )
         return 202, updated.result
 
-    def _finish_confirmed(self, operation: Operation, entity: dict[str, Any], *, noop: bool):
+    def _finish_confirmed(
+        self, operation: Operation, entity: dict[str, Any], *, noop: bool, phrase: str | None = None
+    ):
         result = _confirmed(operation.id, entity, noop=noop)
+        if phrase:
+            result["phrase"] = phrase
         updated = self.store.transition(operation.id, "confirmed", result=result)
         return 200, updated.result
 
@@ -697,19 +728,130 @@ class HAServiceApp:
             }))
         return calls
 
-    def _confirm_until_deadline(self, operation: Operation):
+    def _confirm_until_deadline(
+        self,
+        operation: Operation,
+        desired: dict[str, Any] | None = None,
+        phrase: str | None = None,
+    ):
+        target = operation.target if desired is None else desired
         deadline = self.clock() + self.confirmation_timeout
         while True:
             try:
                 entity = self._read(operation.target_id)
             except GatewayError:
                 entity = None
-            if entity is not None and entity["online"] and self._matches(entity, operation.target):
-                return self._finish_confirmed(operation, entity, noop=False)
+            if entity is not None and entity["online"] and self._matches(entity, target):
+                return self._finish_confirmed(operation, entity, noop=False, phrase=phrase)
             remaining = deadline - self.clock()
             if remaining <= 0:
                 return self._finish_unconfirmed(operation, "confirmation_timeout")
             self.sleep(min(self.poll_interval, remaining))
+
+    # ------------------------------------------------------------- comfort
+    def _adjust_ac(self, body: dict[str, Any]):
+        """Move the AC by one configured step, or turn it on at the comfort default.
+
+        The direction comes from the user's words; every number comes from the
+        catalog. This is what keeps "有点热" from turning into a temperature the
+        model made up.
+        """
+        operation_id = body.get("operation_id") if isinstance(body, dict) else None
+        if not isinstance(body, dict) or set(body) - {"device_id", "direction", "operation_id"}:
+            return 400, _error("invalid_request", operation_id if isinstance(operation_id, str) else None)
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            return 400, _error("invalid_request")
+        device_id = body.get("device_id")
+        direction = body.get("direction")
+        if not isinstance(device_id, str) or not device_id:
+            return 400, _error("invalid_request", operation_id)
+        if direction not in {"cooler", "warmer"}:
+            return 400, _error("invalid_request", operation_id)
+
+        with self._device_lock(device_id):
+            try:
+                reservation = self.store.reserve(
+                    operation_id, "adjust_ac", device_id, {"direction": direction}, {"direction": direction}
+                )
+            except OperationConflict:
+                return 409, _error("operation_id_conflict", operation_id)
+            if not reservation.created:
+                return self._stored_result(reservation.operation)
+
+            operation = reservation.operation
+            record = self.catalog.get(device_id)
+            if record is None:
+                return self._reject(operation, "not_found")
+            if record["type"] != "ac":
+                return self._reject(operation, "wrong_type")
+            return self._execute_adjust(operation, record, direction)
+
+    def _plan_adjust(self, record: dict[str, Any], entity: dict[str, Any], direction: str):
+        """Return ``(desired_state, service_calls, phrase)`` from local config."""
+        confirmation = record["confirmation"]
+        comfort = float(confirmation["comfort_temp"])
+        step = float(confirmation["temp_step"])
+        minimum = float(confirmation["min_temp"])
+        maximum = float(confirmation["max_temp"])
+        services = record["services"]
+        domain = record["domain"]
+        entity_id = record["entity_id"]
+        state = entity["state"]
+
+        if not state.get("on"):
+            if direction == "warmer":
+                # Raising the target of a unit that is off would not warm anything.
+                return None, None, "空调现在是关着的，要打开吗"
+            mode = confirmation.get("default_mode") or "cool"
+            desired = {"on": True, "mode": mode, "target_temp": comfort}
+            calls = [
+                (domain, services["mode"], {"entity_id": entity_id, "hvac_mode": mode}),
+                (domain, services["temperature"], {"entity_id": entity_id, "temperature": comfort}),
+            ]
+            return (
+                desired,
+                calls,
+                f"已按本地设定把{record['name']}开到{_MODE_NAMES.get(mode, mode)}，{comfort:g} 度",
+            )
+
+        current = state.get("target_temp")
+        base = float(current) if isinstance(current, (int, float)) else comfort
+        target = base - step if direction == "cooler" else base + step
+        target = max(minimum, min(maximum, target))
+        desired = {"on": True, "target_temp": target}
+        if target == base:
+            limit = "最低" if direction == "cooler" else "最高"
+            return desired, [], f"{record['name']}已经是{limit}温度 {base:g} 度了"
+        return desired, [
+            (domain, services["temperature"], {"entity_id": entity_id, "temperature": target})
+        ], f"已把{record['name']}调到 {target:g} 度"
+
+    def _execute_adjust(self, operation: Operation, record: dict[str, Any], direction: str):
+        try:
+            entity = self._read(operation.target_id)
+        except GatewayError as exc:
+            return self._reject(operation, exc.code)
+        if not entity["online"]:
+            return self._reject(operation, "offline")
+
+        desired, calls, phrase = self._plan_adjust(record, entity, direction)
+        if desired is None:
+            return self._reject(operation, "not_applicable")
+        if not calls or self._matches(entity, desired):
+            return self._finish_confirmed(operation, entity, noop=True, phrase=phrase)
+
+        submitted = self.store.transition(operation.id, "submitted")
+        completed_calls = 0
+        try:
+            for domain, service, data in calls:
+                self.gateway.call(domain, service, data)
+                completed_calls += 1
+        except GatewayError as exc:
+            if exc.may_have_submitted or completed_calls:
+                code = exc.code if exc.may_have_submitted else "submission_unknown"
+                return self._finish_unconfirmed(submitted, code)
+            return self._reject(submitted, exc.code)
+        return self._confirm_until_deadline(submitted, desired, phrase)
 
     def reconcile_unfinished(self):
         """Resolve operations left behind by a crash, per the approved semantics.
