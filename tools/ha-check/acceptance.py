@@ -128,6 +128,25 @@ def normalize_state(record):
     }
 
 
+def wait_for_state(entity_id, predicate, timeout=15.0, interval=0.5):
+    """Return the normalized state once ``predicate`` accepts it, else ``None``.
+
+    ``wait_until`` returns whatever its predicate returned, so a bare comparison
+    would yield ``True`` and callers would then subscript a bool.
+    """
+    matched = {}
+
+    def check():
+        state = normalize_state(entity_state(entity_id))
+        if predicate(state):
+            matched["state"] = state
+            return True
+        return False
+
+    wait_until(check, timeout=timeout, interval=interval)
+    return matched.get("state")
+
+
 class Report:
     def __init__(self):
         self.checks = []
@@ -185,13 +204,14 @@ def _run_checks(report, service_url, fault_file, skip_faults=False):
         {"device_id": "living_room_light", "brightness": 50,
          "operation_id": str(uuid.uuid4())},
     )
-    observed = wait_until(
-        lambda: normalize_state(entity_state(ENTITY_IDS["living_room_light"]))["brightness_pct"] == 50
+    observed = wait_for_state(
+        ENTITY_IDS["living_room_light"], lambda state: state["brightness_pct"] == 50
     )
     report.require(
         "light_50_confirmed",
-        status == 200 and body.get("status") == "confirmed" and observed,
-        f"http={status} status={body.get('status')} brightness={observed}",
+        status == 200 and body.get("status") == "confirmed" and observed is not None,
+        f"http={status} status={body.get('status')} "
+        f"brightness={observed and observed['brightness_pct']}",
     )
 
     status, body = service_request(
@@ -199,13 +219,15 @@ def _run_checks(report, service_url, fault_file, skip_faults=False):
         {"device_id": "bedroom_ac", "mode": "cool", "target_temp": 24,
          "operation_id": str(uuid.uuid4())},
     )
-    ac = wait_until(
-        lambda: normalize_state(entity_state(ENTITY_IDS["bedroom_ac"]))["hvac_mode"] == "cool"
+    ac = wait_for_state(
+        ENTITY_IDS["bedroom_ac"],
+        lambda state: state["hvac_mode"] == "cool" and state["target_temp"] == 24,
     )
     report.require(
         "ac_cool_24_confirmed",
-        status == 200 and body.get("status") == "confirmed" and bool(ac),
-        f"http={status} status={body.get('status')} mode={ac and ac['hvac_mode']}",
+        status == 200 and body.get("status") == "confirmed" and ac is not None,
+        f"http={status} status={body.get('status')} "
+        f"mode={ac and ac['hvac_mode']} temp={ac and ac['target_temp']}",
     )
 
     # A duplicate operation id must replay instead of commanding twice.
@@ -305,13 +327,13 @@ def run_fault_checks(report, service_url, fault_file):
         f"http={status} status={body.get('status')} code={body.get('error_code')}",
     )
     # Late completion is expected and proves the timeout meant "unconfirmed".
-    late = wait_until(
-        lambda: normalize_state(entity_state(light))["brightness_pct"] == 90, timeout=20.0
+    late = wait_for_state(
+        light, lambda state: state["brightness_pct"] == 90, timeout=20.0
     )
     atomic_write_json(fault_file, {"delay_seconds": 0})
     report.record(
         "delayed_command_completes_late",
-        bool(late),
+        late is not None,
         f"brightness={late and late['brightness_pct']}",
     )
 

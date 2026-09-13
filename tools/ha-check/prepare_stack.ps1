@@ -5,6 +5,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 promotes a native command's stderr into a terminating
+# error once $ErrorActionPreference is 'Stop', and Docker writes its progress to
+# stderr. Every native call below therefore redirects stderr to $null and is
+# validated through $LASTEXITCODE instead.
 $RepoRoot = (Resolve-Path $RepoRoot).Path
 $runtime = Join-Path $RepoRoot 'runtime\home-assistant'
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
@@ -36,6 +40,33 @@ function New-RandomPassword {
     }
 }
 
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [string]$StandardInput
+    )
+
+    # Windows PowerShell 5.1 turns a native command's stderr into a terminating
+    # error while $ErrorActionPreference is 'Stop', and Docker writes its build
+    # progress to stderr. The preference is relaxed for the call instead, and the
+    # exit code is checked explicitly by the caller.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($PSBoundParameters.ContainsKey('StandardInput')) {
+            $StandardInput, $StandardInput | & $Command @Arguments 2>&1 | Out-Null
+        }
+        else {
+            & $Command @Arguments 2>&1 | Out-Null
+        }
+        return $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 function Invoke-MosquittoPasswd {
     param(
         [Parameter(Mandatory = $true)][string]$Username,
@@ -50,9 +81,10 @@ function Invoke-MosquittoPasswd {
     }
     $arguments += @('/work/password_file', $Username)
 
-    $Password, $Password | & docker @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "mosquitto_passwd failed for user '$Username' (exit $LASTEXITCODE)"
+    # The password travels over stdin only, never as a command-line argument.
+    $exitCode = Invoke-Native -Command 'docker' -Arguments $arguments -StandardInput $Password
+    if ($exitCode -ne 0) {
+        throw "mosquitto_passwd failed for user '$Username' (exit $exitCode)"
     }
 }
 
@@ -91,6 +123,17 @@ else {
     Write-Host 'Reusing existing local MQTT credentials (values not read or displayed).'
 }
 
+# The broker runs as an unprivileged user inside the container, so the hash file
+# must be readable there. 0644 exposes only password hashes, never plaintext.
+$runtimeDockerPathForChmod = $runtime.Replace('\', '/')
+$chmodExit = Invoke-Native -Command 'docker' -Arguments @(
+    'run', '--rm', '--volume', "${runtimeDockerPathForChmod}:/work",
+    'eclipse-mosquitto:2', 'chmod', '644', '/work/password_file'
+)
+if ($chmodExit -ne 0) {
+    throw "Could not make password_file readable for the broker (exit $chmodExit)"
+}
+
 $repoDockerPath = $RepoRoot.Replace('\', '/')
 $composeEnv = @(
     "SHV_MOSQUITTO_CONFIG=$repoDockerPath/infra/home-assistant/mosquitto.conf"
@@ -100,8 +143,11 @@ $composeEnv = @(
 ) -join "`n"
 Set-Content -Path (Join-Path $runtime 'compose.env') -Value $composeEnv -Encoding utf8
 
-& docker build --tag 'shv-device-simulator:local' (Join-Path $RepoRoot 'apps\device-simulator')
-if ($LASTEXITCODE -ne 0) {
-    throw "Simulator image build failed (exit $LASTEXITCODE)"
+$buildExit = Invoke-Native -Command 'docker' -Arguments @(
+    'build', '--tag', 'shv-device-simulator:local',
+    (Join-Path $RepoRoot 'apps\device-simulator')
+)
+if ($buildExit -ne 0) {
+    throw "Simulator image build failed (exit $buildExit)"
 }
 Write-Host 'Built shv-device-simulator:local.'

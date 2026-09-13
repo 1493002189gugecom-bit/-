@@ -72,13 +72,25 @@ def _fault_file_watcher(runtime, path, stop_event, interval=0.25):
 
 
 def graceful_shutdown(client, prefix, wait_timeout=1.0):
+    """Publish a retained offline status, then disconnect exactly once.
+
+    Shutdown must never raise: if the broker was never reachable, the client has
+    already published its will (or never connected at all), and crashing on the
+    way out would only hide the real connection error.
+    """
     try:
         publication = client.publish(
             f"{prefix}/status", "offline", qos=1, retain=True
         )
-        publication.wait_for_publish(timeout=wait_timeout)
+        try:
+            publication.wait_for_publish(timeout=wait_timeout)
+        except (RuntimeError, ValueError, OSError):
+            pass
     finally:
-        client.disconnect()
+        try:
+            client.disconnect()
+        except (RuntimeError, ValueError, OSError):
+            pass
 
 
 def run():

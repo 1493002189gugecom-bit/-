@@ -206,6 +206,27 @@ def test_graceful_shutdown_publishes_waits_then_disconnects():
     ]
 
 
+def test_graceful_shutdown_does_not_raise_when_the_client_never_connected():
+    """A broker that was never reachable must not crash the shutdown path."""
+    calls = []
+
+    class MessageInfo:
+        def wait_for_publish(self, timeout=None):
+            raise RuntimeError("Message publish failed: The client is not currently connected.")
+
+    class FakeClient:
+        def publish(self, topic, payload, qos=0, retain=False):
+            calls.append(("publish", topic))
+            return MessageInfo()
+
+        def disconnect(self):
+            calls.append(("disconnect",))
+
+    graceful_shutdown(FakeClient(), "house")
+
+    assert calls == [("publish", "house/status"), ("disconnect",)]
+
+
 def test_fault_controls_reject_invalid_values_without_mqtt_management_topics(tmp_path):
     runtime = SimulatorRuntime(
         tmp_path / "state.json", FakePublisher(), sleep=lambda _: None

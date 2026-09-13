@@ -49,6 +49,49 @@ def test_wait_until_returns_value_or_none():
     assert wait_until(lambda: None, timeout=0.0, interval=0.0) is None
 
 
+def test_wait_for_state_returns_the_state_not_a_boolean(monkeypatch):
+    """Regression: a bare comparison predicate made the helper return ``True``
+    and the caller then subscripted a bool."""
+    records = [
+        {"state": "off", "attributes": {"brightness": 0}},
+        {"state": "on", "attributes": {"brightness": 128}},
+    ]
+    calls = {"count": 0}
+
+    def fake_entity_state(entity_id):
+        index = min(calls["count"], len(records) - 1)
+        calls["count"] += 1
+        return records[index]
+
+    monkeypatch.setattr(acceptance, "entity_state", fake_entity_state)
+
+    state = acceptance.wait_for_state(
+        "light.x", lambda item: item["brightness_pct"] == 50, timeout=5.0, interval=0.0
+    )
+
+    assert isinstance(state, dict)
+    assert state["brightness_pct"] == 50
+    assert state["raw_state"] == "on"
+
+
+def test_wait_for_state_returns_none_when_the_predicate_never_matches(monkeypatch):
+    monkeypatch.setattr(
+        acceptance,
+        "entity_state",
+        lambda entity_id: {"state": "off", "attributes": {"brightness": 0}},
+    )
+
+    assert (
+        acceptance.wait_for_state(
+            "light.x",
+            lambda item: item["brightness_pct"] == 90,
+            timeout=0.0,
+            interval=0.0,
+        )
+        is None
+    )
+
+
 def test_report_requires_and_raises_on_failure(capsys):
     report = Report()
     report.require("ok_check", True)

@@ -27,8 +27,35 @@ def command_publications_for_tests(prefix="shv"):
     ]
 
 
-def _device(unique_id, name):
-    return {"identifiers": [unique_id], "name": name, "manufacturer": "SHV"}
+# Deliberately no ``device`` block. Home Assistant 2026.6.3 ignores ``object_id``
+# for MQTT discovery and prefixes the entity id with the *device* name slug, so a
+# device block produced ``light.ke_ting_deng_shv_living_room_light``. Without it
+# the entity id is exactly the entity-name slug, which is the stable id that the
+# home-service catalog matches on.
+CHINESE_LABELS = {
+    "shv_living_room_light": "客厅灯",
+    "shv_bedroom_ac": "卧室空调",
+    "shv_desk_plug": "智能插座",
+    "shv_indoor_temperature": "室内温度",
+}
+
+
+def entity_name(unique_id):
+    """Entity name whose Home Assistant slug is exactly ``unique_id``.
+
+    The entity id must be predictable: it is what the home-service catalog maps
+    to a stable device id. A Chinese name slugifies to pinyin such as
+    ``ke_ting_deng``, which no catalog can anticipate.
+    """
+    return unique_id.replace("shv_", "SHV ").replace("_", " ").title()
+
+
+def slugify_entity_name(name):
+    """Mirror Home Assistant's slugify so the naming invariant can be tested."""
+    lowered = name.strip().lower()
+    return "".join(
+        character if character.isalnum() else "_" for character in lowered
+    ).strip("_")
 
 
 def _availability(prefix, device_id):
@@ -55,9 +82,8 @@ def discovery_messages(prefix="shv"):
             "homeassistant/light/shv_living_room_light/config",
             json.dumps(
                 {
-                    "name": "客厅灯",
+                    "name": entity_name("shv_living_room_light"),
                     "unique_id": "shv_living_room_light",
-                    "device": _device("shv_living_room_light", "客厅灯"),
                     "command_topic": f"{prefix}/living_room_light/set",
                     "state_topic": f"{prefix}/living_room_light/state",
                     "schema": "json",
@@ -72,9 +98,8 @@ def discovery_messages(prefix="shv"):
             "homeassistant/climate/shv_bedroom_ac/config",
             json.dumps(
                 {
-                    "name": "卧室空调",
+                    "name": entity_name("shv_bedroom_ac"),
                     "unique_id": "shv_bedroom_ac",
-                    "device": _device("shv_bedroom_ac", "卧室空调"),
                     "mode_command_topic": f"{prefix}/bedroom_ac/mode/set",
                     "mode_state_topic": f"{prefix}/bedroom_ac/mode/state",
                     "temperature_command_topic": f"{prefix}/bedroom_ac/temperature/set",
@@ -93,9 +118,8 @@ def discovery_messages(prefix="shv"):
             "homeassistant/switch/shv_desk_plug/config",
             json.dumps(
                 {
-                    "name": "智能插座",
+                    "name": entity_name("shv_desk_plug"),
                     "unique_id": "shv_desk_plug",
-                    "device": _device("shv_desk_plug", "智能插座"),
                     "command_topic": f"{prefix}/desk_plug/set",
                     "state_topic": f"{prefix}/desk_plug/state",
                     **_availability(prefix, "desk_plug"),
@@ -107,9 +131,8 @@ def discovery_messages(prefix="shv"):
             "homeassistant/sensor/shv_indoor_temperature/config",
             json.dumps(
                 {
-                    "name": "室内温度",
+                    "name": entity_name("shv_indoor_temperature"),
                     "unique_id": "shv_indoor_temperature",
-                    "device": _device("shv_indoor_temperature", "室内温度"),
                     "state_topic": f"{prefix}/indoor_temperature/state",
                     "device_class": "temperature",
                     "state_class": "measurement",
