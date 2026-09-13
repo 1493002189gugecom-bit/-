@@ -1,0 +1,29 @@
+{
+  "leave_home": {
+    "name": "我出门了",
+    "aliases": ["出门", "离家", "都关掉", "全部关闭"],
+    "steps": [
+      {"device_id": "living_room_light", "on": false},
+      {"device_id": "bedroom_ac", "on": false},
+      {"device_id": "desk_plug", "on": false}
+    ]
+  },
+  "arrive_home": {
+    "name": "我回来了",
+    "aliases": ["回家", "到家", "我到家了"],
+    "steps": [
+      {"device_id": "living_room_light", "on": true, "brightness": 80},
+      {"device_id": "bedroom_ac", "on": true, "mode": "cool", "target_temp": 26},
+      {"device_id": "desk_plug", "on": true}
+    ]
+  },
+  "good_night": {
+    "name": "我要睡觉了",
+    "aliases": ["睡觉", "晚安", "准备睡了"],
+    "steps": [
+      {"device_id": "living_room_light", "on": false},
+      {"device_id": "desk_plug", "on": false},
+      {"device_id": "bedroom_ac", "on": true, "mode": "cool", "target_temp": 26}
+    ]
+  }
+}

@@ -28,6 +28,29 @@ which may call four **restricted** tools on the local `home-service`:
 | `query_device_status` | one device's current state |
 | `set_light` | `on`, `brightness` 0–100 |
 | `set_ac` | `on`, `mode` (`off`/`cool`/`fan_only`), `target_temp` 16–30 |
+| `set_switch` | `on` |
+| `run_scene` | one phrase that drives several devices |
+
+The device list and the scene list are both read from `home-service` at startup,
+so a device or scene added to its configuration becomes speakable with no code
+change. The model only ever sees closed enums.
+
+### Scenes
+
+| Say | Scene | Devices |
+| --- | --- | --- |
+| 我出门了 / 都关掉 | `leave_home` | light off, AC off, plug off |
+| 我回来了 | `arrive_home` | light on 80%, AC cool 26, plug on |
+| 我要睡觉了 / 晚安 | `good_night` | light off, plug off, AC cool 26 |
+
+Define more in `apps/home-service/config/scenes.json`. Each step must name a
+catalogued device and may only pass parameters that device type accepts; the file
+is validated at startup, so a typo fails there rather than when you say the phrase.
+
+**Partial success is reported as partial.** With the plug offline, 我出门了 speaks
+"客厅灯已关闭；卧室空调已关闭；智能插座设备当前离线" — it never claims the whole
+house is off. Each device is confirmed individually, and a device that failed is
+left untouched.
 
 Without `--agent` the loop keeps its original behaviour and touches no device.
 

@@ -124,6 +124,7 @@ try {
     Write-Host ''
     Write-Host "      唤醒词：$words" -ForegroundColor Yellow
     Write-Host '      说唤醒词后即可连续对话，例如“打开客厅灯”“把卧室空调调到 24 度”。'
+    Write-Host '      也可以整句说“我出门了”“我回来了”“我要睡觉了”。'
     Write-Host '      说“没事了”或静默 20 秒结束会话。Ctrl+C 退出。'
     Write-Host ''
 

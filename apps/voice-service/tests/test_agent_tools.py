@@ -148,6 +148,7 @@ def test_every_control_kind_maps_to_a_declared_tool_name():
         "set_light",
         "set_ac",
         "set_switch",
+        "run_scene",
     }
 
 

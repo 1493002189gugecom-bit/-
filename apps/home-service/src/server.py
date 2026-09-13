@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from ha_gateway import HAGateway
-from ha_service import HAServiceApp, load_catalog
+from ha_service import HAServiceApp, load_catalog, load_scenes
 from models import VisualObservation, now_ms
 from notify import plan_notification
 from state import HomeState, StateError, build_default_state
@@ -34,6 +34,10 @@ def default_config_path() -> Path:
 
 def default_catalog_path() -> Path:
     return Path(__file__).resolve().parents[1] / "config" / "ha_entities.json"
+
+
+def default_scenes_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "config" / "scenes.json"
 
 
 def _runtime_environment() -> dict[str, str]:
@@ -85,7 +89,12 @@ def build_app_from_environment(config: Path | None = None):
     )
     catalog_path = Path(values.get("HA_ENTITY_CATALOG", str(default_catalog_path())))
     database = Path(required_value(values, "HA_OPERATION_DB"))
-    app = HAServiceApp(gateway, load_catalog(catalog_path), database)
+    catalog = load_catalog(catalog_path)
+    scenes_path = Path(values.get("HA_SCENES", str(default_scenes_path())))
+    # Scenes are validated against the catalog at startup, so a broken scene file
+    # cannot wait until a user says "我出门了" to fail.
+    scenes = load_scenes(scenes_path, catalog) if scenes_path.exists() else {}
+    app = HAServiceApp(gateway, catalog, database, scenes=scenes)
     # Crash recovery must finish before the service accepts requests, so no
     # caller can observe a half-resolved operation.
     app.reconcile_unfinished()

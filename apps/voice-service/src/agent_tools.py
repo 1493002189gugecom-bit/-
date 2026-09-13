@@ -22,9 +22,13 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 TOOL_KIND_BY_TYPE = {"light": "set_light", "ac": "set_ac", "switch": "set_switch"}
 CONTROL_KINDS = ("set_light", "set_ac", "set_switch")
 READ_TOOLS = ("query_room_status", "query_device_status")
+SCENE_TOOL = "run_scene"
+# Tools that change the house. Their results, not the model's prose, decide what
+# the user is told.
+WRITE_TOOLS = CONTROL_KINDS + (SCENE_TOOL,)
 # Every tool this agent may ever expose. The concrete surface is a subset chosen
 # by the catalog, never a different set of names.
-HOME_TOOL_NAMES = READ_TOOLS + CONTROL_KINDS
+HOME_TOOL_NAMES = READ_TOOLS + WRITE_TOOLS
 
 # Value domains, which are not device-specific.
 AC_MODES = ("off", "cool", "fan_only")
@@ -72,8 +76,12 @@ def _device_enum(ids: list[str], description: str) -> dict[str, Any]:
     return {"type": "string", "enum": sorted(ids), "description": description}
 
 
-def build_tool_schemas(catalog: list[dict[str, Any]]):
-    """Return ``(schemas, devices_by_kind)`` for one catalog snapshot."""
+def build_tool_schemas(catalog: list[dict[str, Any]], scenes: list[dict[str, Any]] | None = None):
+    """Return ``(schemas, devices_by_kind)`` for one catalog snapshot.
+
+    Scenes come from the same source, so a scene defined in the service is
+    immediately speakable and no scene name is ever guessed by the model.
+    """
     devices_by_kind: dict[str, list[str]] = {}
     for device in catalog:
         kind = TOOL_KIND_BY_TYPE.get(device.get("type", ""))
@@ -185,6 +193,36 @@ def build_tool_schemas(catalog: list[dict[str, Any]]):
                     },
                 }
             )
+    if scenes:
+        described = "；".join(
+            f"{scene['name']}（{scene['id']}"
+            + (f"，也可说：{'、'.join(scene['aliases'])}" if scene.get("aliases") else "")
+            + "）"
+            for scene in scenes
+        )
+        schemas.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": SCENE_TOOL,
+                    "description": (
+                        "一次执行一组设备动作的场景，适合“我出门了”“我要睡觉了”这类整体指令。"
+                        f"可用场景：{described}。"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "scene_id": {
+                                "type": "string",
+                                "enum": sorted(scene["id"] for scene in scenes),
+                            }
+                        },
+                        "required": ["scene_id"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
     return schemas, devices_by_kind
 
 
@@ -195,6 +233,7 @@ _ALLOWED_ARGUMENTS = {
     "set_light": {"device_id", "on", "brightness"},
     "set_ac": {"device_id", "on", "mode", "target_temp"},
     "set_switch": {"device_id", "on"},
+    SCENE_TOOL: {"scene_id"},
 }
 
 
@@ -240,6 +279,7 @@ def normalize_arguments(
     arguments: dict[str, Any],
     devices_by_kind: dict[str, list[str]] | None = None,
     known_ids: list[str] | None = None,
+    scene_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Validate against the catalog so no code lists devices by hand."""
     if name not in _ALLOWED_ARGUMENTS:
@@ -256,6 +296,15 @@ def normalize_arguments(
     known = list(known_ids or [])
 
     normalized: dict[str, Any] = {}
+    if name == SCENE_TOOL:
+        scene_id = _optional_text("scene_id", arguments.get("scene_id"))
+        scenes = list(scene_ids or [])
+        if scenes and scene_id not in scenes:
+            raise ToolArgumentError("invalid_arguments", f"没有这个场景：{scene_id}")
+        if not scenes:
+            raise ToolArgumentError("invalid_arguments", "当前没有可用场景")
+        return {"scene_id": scene_id}
+
     if name == "query_room_status":
         if "room" in arguments:
             normalized["room"] = _optional_text("room", arguments["room"])
@@ -325,23 +374,35 @@ class HomeToolExecutor:
         # redirected request must never carry data somewhere else.
         self.opener = build_opener(ProxyHandler({}), _NoRedirect())
         self._catalog = catalog
+        self._scenes: list[dict[str, Any]] = []
         self._schemas: list[dict[str, Any]] | None = None
         self._devices_by_kind: dict[str, list[str]] = {}
         self._known_ids: list[str] = []
+        self._scene_ids: list[str] = []
 
     # -------------------------------------------------------------- discovery
     def catalog(self) -> list[dict[str, Any]]:
         """Fetch the device catalog once; it defines the whole tool surface."""
         if self._catalog is None:
-            status, body = self._request("GET", "/catalog", None, None)
-            devices = (body.get("data") or {}).get("devices") if status == 200 else None
-            self._catalog = devices or []
+            self._load_catalog()
         return self._catalog
+
+    def scenes(self) -> list[dict[str, Any]]:
+        if self._catalog is None:
+            self._load_catalog()
+        return self._scenes
+
+    def _load_catalog(self) -> None:
+        status, body = self._request("GET", "/catalog", None, None)
+        data = (body.get("data") or {}) if status == 200 else {}
+        self._catalog = data.get("devices") or []
+        self._scenes = data.get("scenes") or []
 
     def schemas(self) -> list[dict[str, Any]]:
         if self._schemas is None:
-            self._schemas, self._devices_by_kind = build_tool_schemas(self.catalog())
+            self._schemas, self._devices_by_kind = build_tool_schemas(self.catalog(), self.scenes())
             self._known_ids = [device["id"] for device in self.catalog()]
+            self._scene_ids = [scene["id"] for scene in self.scenes()]
         return self._schemas
 
     def device_name(self, device_id: str) -> str:
@@ -374,10 +435,12 @@ class HomeToolExecutor:
 
     # -------------------------------------------------------------- execution
     def execute(self, name: str, arguments: dict[str, Any], operation_id: str | None = None) -> ToolResult:
-        if name in CONTROL_KINDS:
-            self.schemas()  # ensure the catalog-derived enums are loaded
+        if name in WRITE_TOOLS:
+            self.schemas()  # ensure the catalog-derived enums and scenes are loaded
         try:
-            normalized = normalize_arguments(name, arguments, self._devices_by_kind, self._known_ids)
+            normalized = normalize_arguments(
+                name, arguments, self._devices_by_kind, self._known_ids, self._scene_ids
+            )
         except ToolArgumentError as exc:
             # The model is corrected, not the device: nothing is sent.
             return ToolResult(
@@ -413,8 +476,7 @@ class HomeToolExecutor:
 
         result = ToolResult(
             name=name,
-            ok=bool(body.get("ok")) and status < 400,
-            error_code=body.get("error_code"),
+            ok=bool(body.get("ok")) and status < 400,            error_code=body.get("error_code"),
             message=body.get("error"),
             phrase=body.get("phrase"),
             data=body.get("data"),

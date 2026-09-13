@@ -25,6 +25,14 @@ CONTROL_TOOLS = (
     "set_ac",
     "set_switch",
 )
+SCENE_TOOL = "run_scene"
+# A scene step must carry exactly the parameters its device type accepts.
+STEP_PARAMETERS = {
+    "light": {"on", "brightness"},
+    "ac": {"on", "mode", "target_temp"},
+    "switch": {"on"},
+    "sensor": set(),
+}
 
 # What each device type can be asked to do. The agent derives its tool surface
 # from this, so adding a device to the catalog makes it controllable without
@@ -35,8 +43,9 @@ CAPABILITIES = {
     "switch": ("on",),
     "sensor": (),
 }
-# Tool kind -> the device type it may act on.
+# Tool kind -> the device type it may act on, and the reverse for scene steps.
 KIND_DEVICE_TYPE = {"set_light": "light", "set_ac": "ac", "set_switch": "switch"}
+DEVICE_TYPE_KIND = {device_type: kind for kind, device_type in KIND_DEVICE_TYPE.items()}
 
 
 def load_catalog(path: str | Path) -> dict[str, dict[str, Any]]:
@@ -72,6 +81,59 @@ def load_catalog(path: str | Path) -> dict[str, dict[str, Any]]:
         # so renaming an entity can never change what the Agent may ask for.
         result[device_id] = {**record, "id": device_id}
     return result
+
+
+def load_scenes(path: str | Path, catalog: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Load and validate named multi-device scenes.
+
+    A scene is configuration, not code: it may only reference catalogued devices
+    and only pass parameters that device type actually accepts, so a typo fails at
+    startup rather than at the moment a user says "我出门了".
+    """
+    value = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or not value:
+        raise ValueError("scenes must be a non-empty object")
+
+    scenes: dict[str, dict[str, Any]] = {}
+    for scene_id, record in value.items():
+        if not isinstance(record, dict):
+            raise ValueError(f"invalid scene: {scene_id}")
+        if not isinstance(record.get("name"), str) or not record["name"].strip():
+            raise ValueError(f"scene {scene_id} needs a name")
+        steps = record.get("steps")
+        if not isinstance(steps, list) or not steps:
+            raise ValueError(f"scene {scene_id} needs at least one step")
+        aliases = record.get("aliases") or []
+        if not isinstance(aliases, list) or not all(isinstance(item, str) for item in aliases):
+            raise ValueError(f"scene {scene_id} aliases must be strings")
+
+        normalized_steps = []
+        for step in steps:
+            if not isinstance(step, dict):
+                raise ValueError(f"scene {scene_id} has an invalid step")
+            device_id = step.get("device_id")
+            device = catalog.get(device_id)
+            if device is None:
+                raise ValueError(f"scene {scene_id} references unknown device {device_id!r}")
+            allowed = STEP_PARAMETERS.get(device["type"], set())
+            parameters = {key: value for key, value in step.items() if key != "device_id"}
+            if not parameters:
+                raise ValueError(f"scene {scene_id} step for {device_id} changes nothing")
+            extra = set(parameters) - allowed
+            if extra:
+                raise ValueError(
+                    f"scene {scene_id} step for {device_id} has unsupported parameters: "
+                    f"{', '.join(sorted(extra))}"
+                )
+            normalized_steps.append({"device_id": device_id, **parameters})
+
+        scenes[scene_id] = {
+            "id": scene_id,
+            "name": record["name"].strip(),
+            "aliases": [alias.strip() for alias in aliases if alias.strip()],
+            "steps": normalized_steps,
+        }
+    return scenes
 
 
 def _number(value: Any, name: str) -> float:
@@ -193,6 +255,7 @@ class HAServiceApp:
         catalog: dict[str, dict[str, Any]],
         database: str | Path,
         *,
+        scenes: dict[str, dict[str, Any]] | None = None,
         confirmation_timeout: float = 3.0,
         poll_interval: float = 0.1,
         clock=time.monotonic,
@@ -206,6 +269,7 @@ class HAServiceApp:
             self.catalog[device_id] = copied
         if set(self.catalog) != DEVICE_IDS:
             raise ValueError("HA entity catalog must contain exactly four devices")
+        self.scenes = dict(scenes or {})
         self.store = OperationStore(database)
         self.confirmation_timeout = float(confirmation_timeout)
         self.poll_interval = float(poll_interval)
@@ -230,7 +294,7 @@ class HAServiceApp:
         if method == "GET" and path == "/health":
             return 200, {"ok": True, "backend": "ha", "tools": list(CONTROL_TOOLS)}
         if method == "GET" and path == "/catalog":
-            return 200, {"ok": True, "data": {"devices": self.catalog_view()}}
+            return 200, {"ok": True, "data": {"devices": self.catalog_view(), "scenes": self.scene_view()}}
         if method == "GET" and path == "/tool/device_status":
             return self._query_devices(self._first(query, "device"), self._first(query, "room"))
         if method == "GET" and path == "/tool/room_status":
@@ -241,7 +305,21 @@ class HAServiceApp:
             return self._control("set_ac", body)
         if method == "POST" and path == "/tool/set_switch":
             return self._control("set_switch", body)
+        if method == "POST" and path == "/tool/run_scene":
+            return self._run_scene(body)
         return 404, {"ok": False, "error": f"no route for {method} {path}"}
+
+    def scene_view(self) -> list[dict[str, Any]]:
+        """Describe the available scenes so a caller can expose them as one tool."""
+        return [
+            {
+                "id": scene["id"],
+                "name": scene["name"],
+                "aliases": list(scene["aliases"]),
+                "devices": [step["device_id"] for step in scene["steps"]],
+            }
+            for scene in self.scenes.values()
+        ]
 
     def catalog_view(self) -> list[dict[str, Any]]:
         """Describe every device so a caller can build its own tool surface."""
@@ -419,6 +497,98 @@ class HAServiceApp:
             if record["type"] != expected_type:
                 return self._reject(reservation.operation, "wrong_type")
             return self._execute_accepted(reservation.operation)
+
+    # ------------------------------------------------------------------ scenes
+    def _run_scene(self, body: dict[str, Any]):
+        operation_id = body.get("operation_id") if isinstance(body, dict) else None
+        if not isinstance(body, dict) or set(body) - {"scene_id", "operation_id"}:
+            return 400, _error("invalid_request", operation_id if isinstance(operation_id, str) else None)
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            return 400, _error("invalid_request")
+        scene_id = body.get("scene_id")
+        scene = self.scenes.get(scene_id) if isinstance(scene_id, str) else None
+        if scene is None:
+            return 400, _error("not_found", operation_id)
+
+        results = []
+        for step in scene["steps"]:
+            device_id = step["device_id"]
+            record = self.catalog[device_id]
+            kind = DEVICE_TYPE_KIND[record["type"]]
+            # Every device keeps its own operation record, derived from the scene
+            # operation. Replaying the scene therefore replays each device's stored
+            # outcome instead of commanding the house a second time.
+            step_body = {key: value for key, value in step.items() if key != "device_id"}
+            step_body["device_id"] = device_id
+            step_body["operation_id"] = f"{operation_id}:{device_id}"
+            _, payload = self._control(kind, step_body)
+            results.append(
+                {
+                    "device_id": device_id,
+                    "device_name": record["name"],
+                    "ok": bool(payload.get("ok")),
+                    "status": payload.get("status"),
+                    "error_code": payload.get("error_code"),
+                    "phrase": payload.get("phrase"),
+                    "message": payload.get("error"),
+                    "state": (payload.get("data") or {}).get("state"),
+                }
+            )
+        return self._scene_result(scene, results, operation_id)
+
+    @staticmethod
+    def _describe_step(result: dict[str, Any]) -> str:
+        name = result["device_name"]
+        if not result["ok"]:
+            return f"{name}{result['message'] or '操作失败'}"
+        state = result.get("state") or {}
+        if state.get("on") is True:
+            if "brightness" in state and state["brightness"] is not None:
+                return f"{name}已打开，亮度 {state['brightness']}"
+            if "target_temp" in state and state["target_temp"] is not None:
+                return f"{name}已打开，设定 {state['target_temp']:g} 度"
+            return f"{name}已打开"
+        if state.get("on") is False:
+            return f"{name}已关闭"
+        return f"{name}已更新"
+
+    def _scene_result(self, scene: dict[str, Any], results: list[dict[str, Any]], operation_id: str):
+        succeeded = [item["device_id"] for item in results if item["ok"]]
+        failed = [item["device_id"] for item in results if not item["ok"]]
+        data = {
+            "scene_id": scene["id"],
+            "scene_name": scene["name"],
+            "results": results,
+            "succeeded": succeeded,
+            "failed": failed,
+        }
+        # Partial success is reported as partial. Claiming the whole scene worked
+        # when one device refused would be exactly the lie this service exists to
+        # prevent.
+        if not failed:
+            return 200, {
+                "ok": True,
+                "data": data,
+                "error": None,
+                "error_code": None,
+                "operation_id": operation_id,
+                "status": "confirmed",
+                "phrase": f"{scene['name']}已全部完成：" + "、".join(
+                    self._describe_step(item) for item in results
+                ),
+            }
+
+        summary = "；".join(self._describe_step(item) for item in results)
+        partial = bool(succeeded)
+        return (202 if partial else 400), {
+            "ok": False,
+            "data": data,
+            "error": summary,
+            "error_code": "partial_failure" if partial else (results[0]["error_code"] or "request_failed"),
+            "operation_id": operation_id,
+            "status": "partial_failure" if partial else "failed",
+            "phrase": None,
+        }
 
     def _stored_result(self, operation: Operation):
         if isinstance(operation.result, dict):

@@ -13,7 +13,7 @@ from typing import Any
 
 from agent_client import AgentClient, AgentError, ChatResponse, ToolCall
 from agent_tools import (
-    CONTROL_KINDS,
+    WRITE_TOOLS,
     HomeToolExecutor,
     ToolResult,
     new_operation_id,
@@ -69,7 +69,7 @@ class AgentReply:
 
     @property
     def wrote_device(self) -> bool:
-        return any(result.name in CONTROL_KINDS for result in self.tool_results)
+        return any(result.name in WRITE_TOOLS for result in self.tool_results)
 
 
 class AgentSession:
@@ -124,7 +124,13 @@ class AgentSession:
                 text = self._final_text(response, collected)
                 self.history.append({"role": "assistant", "content": text})
                 self._trim()
-                return AgentReply(text=text, ok=True, tool_results=collected)
+                # `ok` reports whether the house actually changed, not merely that
+                # a reply was produced, so a partial scene failure shows up in the
+                # logs instead of only in the spoken sentence.
+                writes = [result for result in collected if result.name in WRITE_TOOLS]
+                return AgentReply(
+                    text=text, ok=all(result.ok for result in writes), tool_results=collected
+                )
 
             if round_index >= self.max_tool_rounds:
                 # The tool budget is spent and the model still wants more.
@@ -172,7 +178,7 @@ class AgentSession:
         # operation instead of commanding the device a second time.
         key = call.name + ":" + _canonical(call.arguments)
         operation_id = None
-        if call.name in CONTROL_KINDS:
+        if call.name in WRITE_TOOLS:
             operation_id = write_operations.get(key)
             if operation_id is None:
                 operation_id = new_operation_id()
@@ -180,7 +186,7 @@ class AgentSession:
         return self.executor.execute(call.name, call.arguments, operation_id)
 
     def _final_text(self, response: ChatResponse, collected: list[ToolResult]) -> str:
-        writes = [result for result in collected if result.name in CONTROL_KINDS]
+        writes = [result for result in collected if result.name in WRITE_TOOLS]
         failed = [result for result in writes if not result.ok]
         if failed:
             # Model prose is discarded entirely: it cannot be trusted to admit a
