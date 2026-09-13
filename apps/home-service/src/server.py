@@ -7,11 +7,14 @@ is data, not instructions.
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from ha_gateway import HAGateway
+from ha_service import HAServiceApp, load_catalog
 from models import VisualObservation, now_ms
 from notify import plan_notification
 from state import HomeState, StateError, build_default_state
@@ -19,6 +22,74 @@ from tools import TOOL_NAMES, ToolService
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+
+# Only these two variables may be read from the local env file. The file is
+# git-ignored and is never logged or echoed back.
+ENV_FILE_KEYS = frozenset({"HOME_ASSISTANT_URL", "HOME_ASSISTANT_TOKEN"})
+
+
+def default_config_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "config" / "rooms.json"
+
+
+def default_catalog_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "config" / "ha_entities.json"
+
+
+def _runtime_environment() -> dict[str, str]:
+    """Process environment, optionally completed from the local HA env file.
+
+    Real values already present in the environment always win, so a caller can
+    override the file without editing it.
+    """
+    values = dict(os.environ)
+    env_file = values.get("HA_ENV_FILE")
+    if env_file:
+        path = Path(env_file)
+        try:
+            lines = path.read_text(encoding="utf-8-sig").splitlines()
+        except OSError as exc:
+            raise SystemExit(f"HA_ENV_FILE is not readable: {path.name}") from exc
+        for line in lines:
+            key, separator, value = line.partition("=")
+            if separator and key.strip() in ENV_FILE_KEYS:
+                values.setdefault(key.strip(), value.strip())
+    return values
+
+
+def required_value(values: dict[str, str], name: str) -> str:
+    value = values.get(name, "")
+    if not isinstance(value, str) or not value.strip():
+        raise SystemExit(f"{name} is required")
+    return value
+
+
+def build_app_from_environment(config: Path | None = None):
+    """Select exactly one backend. There is no silent fallback.
+
+    An incomplete or misspelled HA configuration must stop the service rather
+    than quietly serving stale in-memory state that the Agent would treat as
+    real device state.
+    """
+    values = _runtime_environment()
+    backend = values.get("HOME_SERVICE_BACKEND", "memory")
+    if backend == "memory":
+        path = default_config_path() if config is None else config
+        return HomeServiceApp(build_default_state(path if path.exists() else None))
+    if backend != "ha":
+        raise SystemExit("HOME_SERVICE_BACKEND must be memory or ha")
+
+    gateway = HAGateway(
+        required_value(values, "HOME_ASSISTANT_URL"),
+        required_value(values, "HOME_ASSISTANT_TOKEN"),
+    )
+    catalog_path = Path(values.get("HA_ENTITY_CATALOG", str(default_catalog_path())))
+    database = Path(required_value(values, "HA_OPERATION_DB"))
+    app = HAServiceApp(gateway, load_catalog(catalog_path), database)
+    # Crash recovery must finish before the service accepts requests, so no
+    # caller can observe a half-resolved operation.
+    app.reconcile_unfinished()
+    return app
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -235,8 +306,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._respond(status, payload)
 
 
-def serve(state: HomeState, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
-    app = HomeServiceApp(state)
+def serve(app: Any, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     handler = type("BoundHandler", (_Handler,), {"app": app})
     server = ThreadingHTTPServer((host, port), handler)
     print(f"home-service listening on http://{host}:{port} (loopback only)")
@@ -254,11 +324,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path(__file__).resolve().parents[1] / "config" / "rooms.json",
-    )
+    parser.add_argument("--config", type=Path, default=default_config_path())
     parser.add_argument("--print-snapshot", action="store_true")
     args = parser.parse_args()
 
@@ -266,11 +332,21 @@ def main() -> int:
         print("refusing to bind anywhere except 127.0.0.1")
         return 2
 
-    state = build_default_state(args.config if args.config.exists() else None)
     if args.print_snapshot:
+        backend = _runtime_environment().get("HOME_SERVICE_BACKEND", "memory")
+        if backend != "memory":
+            # Printing an in-memory snapshot under an HA configuration would
+            # present invented device state as if it were authoritative.
+            print(
+                "--print-snapshot only supports the memory backend; "
+                f"HOME_SERVICE_BACKEND is {backend}"
+            )
+            return 2
+        state = build_default_state(args.config if args.config.exists() else None)
         print(json.dumps(state.snapshot(), ensure_ascii=False, indent=2))
         return 0
-    serve(state, args.host, args.port)
+
+    serve(build_app_from_environment(args.config), args.host, args.port)
     return 0
 
 
