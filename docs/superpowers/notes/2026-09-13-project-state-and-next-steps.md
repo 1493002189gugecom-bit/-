@@ -1,13 +1,14 @@
 # 项目现状与下一步交接说明
 
 日期：2026-09-13
+状态：**项目已迁移到 `E:\smart-home` 并验证通过。**
 
 ## 为什么有这份说明
 
-项目目录要从 `E:\智能家居` 改名为 `E:\smart-home`（原因见下）。改名必须关闭
-DSH Desktop，因此当前会话会结束。这份说明让重开后的会话能直接接上，不必重新探索。
+项目目录已从 `E:\智能家居` 改名为 `E:\smart-home`。DSH 的工作区因此改变，
+重开 DSH 时请选 `E:\smart-home`。这份说明记录迁移结果、踩过的坑和下一步。
 
-## 改名原因与做法
+## 迁移结果（已完成）
 
 **原因**：仓库路径含中文字符。实测 `cv2.imwrite` 在中文路径下**静默失败**；
 ONNX Runtime 加载模型、CUDA/DirectML、ffmpeg 这类 C++ 工具链在非 ASCII 路径下也不可靠。
@@ -15,42 +16,43 @@ ONNX Runtime 加载模型、CUDA/DirectML、ffmpeg 这类 C++ 工具链在非 AS
 **目录联接（junction）不能解决**：已实测 `Path.resolve()` 与 `os.path.realpath()`
 会把联接解析回中文真实路径，而本项目代码正是用 `Path(__file__).resolve()` 定位文件。
 
-**做法**：关闭 DSH Desktop，然后在普通 PowerShell 运行：
+**最终怎么搬成的**：根目录改名始终被拒（见下），于是**逐个搬子项**；卡住的
+`.git` 与 `runtime` 改用 **`Copy-Item` 复制**——源目录只是被持有句柄而
+**不能删改，但可以读**。现在 `E:\smart-home` 是完整仓库：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File E:\smart-home-rename\rename.ps1
-```
+| 校验 | 结果 |
+|---|---|
+| `git log` | 提交历史完整 |
+| `git ls-files` | 143 个跟踪文件 |
+| 全量测试 | **376 passed** |
+| HA 四实体 | 灯/空调/插座/温度全部在线 |
+| 设备工具验收 | **9/9 通过**（含离线不误操作） |
+| `start_agent.ps1 -CheckOnly` | 正常 |
 
-脚本会：检查 DSH → 停占用进程 → 停 HA 栈 → **关停 Docker Desktop** → 改名
-→ **重启 Docker** → 重跑 `prepare_stack.ps1` 重算生成路径 → 重建容器 → 逐项校验。
+**残留（可删）**：`E:\智能家居` 只剩旧的 `.git` 与 `runtime`（都是过时副本，
+`runtime` 已在新区重新生成）。关闭 DSH 后可删：
+`cmd /c rmdir /s /q "E:\智能家居"`。迁移辅助脚本 `E:\smart-home-rename\` 也可删。
 
-改名后重开 DSH，工作区选 `E:\smart-home`。
+### 改名为什么这么麻烦
 
-### 改名为什么这么麻烦（两个隐藏持有者）
-
-| 持有者 | 症状 | 为什么难发现 |
+| 持有者 | 症状 | 关键证据 |
 |---|---|---|
-| **DSH Desktop** | 改名报「另一个进程正在使用」 | 它有 8 个进程，且**不是每个命令行里都带工作区路径**，按命令行检测会漏掉 |
-| **Docker Desktop** | 改名报「**访问被拒绝**」 | 其文件共享给目录加了显式 ACE（`S-1-4-881271916-17797080`），并在共享根持有句柄 |
+| **DSH Desktop** | 「另一个进程正在使用」 | 它有 8 个进程，**不是每个命令行都带工作区路径**，按命令行检测会漏 |
+| **Docker Desktop** | 「**访问被拒绝**」 | 文件共享给目录加了显式 ACE（`S-1-4-881271916-17797080`），并在共享根持有句柄 |
 
-**判定 Docker 是元凶的关键证据**：改**子目录**（`docs`）成功，改**根目录**失败。
-只 `docker compose down` 而 Docker Desktop 仍运行，句柄不会释放。
+- **子目录能改、根目录不能改** → 持有者锁的是**目录本身**，不是内容。
+- **Restart Manager 两个都查不出**（实测「none reported」）。
+- **Move 被拒 ≠ 不能搬**：`Copy-Item` 只要读权限，绕开了「不能删」的限制。
 
-**Restart Manager 查不出这两个**（实测报告 "none reported"），所以脚本改为：
-DSH 按**进程名**检测；Docker 用 `DockerCli.exe -Shutdown` 优雅关停后再改名。
+### 迁移中修掉的两个真实缺陷
 
-### 兜底：搬内容而不是改根目录名
-
-即使 DSH 与 Docker 都关掉，**根目录改名仍可能报「访问被拒绝」**（实测两次）。
-但**改子目录是成功的**（在 DSH 运行中也成功），说明持有者锁的是**目录本身**而非内容。
-所以脚本在根目录改名失败时自动降级：
-
-建 `E:\smart-home` → 把旧目录下**每个子项逐个 Move** 过去（同盘移动即改名）
-→ 若旧目录已空则尝试删除，删不掉也无害。
-
-`.git` 也是子项，随之迁移，提交历史完整。
-
-排查工具：`E:\smart-home-rename\who-holds.ps1`
+1. **`$PSScriptRoot` 在 `param()` 默认值里是空的**（PowerShell 5.1）。原先写
+   `[string]$RepoRoot = (Join-Path $PSScriptRoot '..\..')`，直接点斜杠调用没事，
+   但嵌套 `powershell -File` 就崩。已改为在脚本主体里解析，`prepare_stack.ps1`
+   与 `start_agent.ps1` 都已修。
+2. **编辑会剥掉 `.ps1` 的 UTF-8 BOM**，导致 PowerShell 5.1 按 ANSI 读中文、
+   字符串终止符错乱。已扫描全部 17 个脚本并为含非 ASCII 的补回 BOM。
+   **今后改含中文的 `.ps1` 后要复查 BOM。**
 
 **注意**：`.venv` 里 pip/pytest 的入口 exe 仍烘焙旧绝对路径。始终用本项目既有写法
 `.\.venv\Scripts\python.exe -m <工具>`；只有需要 pip 本身时才重建 venv。
