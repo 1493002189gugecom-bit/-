@@ -1,0 +1,27 @@
+services:
+  homeassistant:
+    ports: !override
+      - "127.0.0.1:8123:8123"
+  mosquitto:
+    ports: !reset []
+    volumes:
+      - ${SHV_MOSQUITTO_CONFIG}:/mosquitto/config/mosquitto.conf:ro
+      - ${SHV_MOSQUITTO_PASSWORD_FILE}:/mosquitto/config/password_file:ro
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+  device-simulator:
+    image: shv-device-simulator:local
+    container_name: shv-device-simulator
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_started
+    env_file:
+      - ${SHV_ENV_FILE}
+    volumes:
+      - ${SHV_RUNTIME_DIR}:/runtime
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      SHV_STATE_FILE: /runtime/device-state.json
+      SHV_FAULT_FILE: /runtime/fault-control.json

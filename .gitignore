@@ -47,6 +47,26 @@
 !/apps/home-service/requirements.lock.txt
 !/apps/home-service/pyproject.toml
 !/apps/home-service/README.md
+!/apps/device-simulator/
+/apps/device-simulator/*
+!/apps/device-simulator/src/
+!/apps/device-simulator/tests/
+!/apps/device-simulator/Dockerfile
+!/apps/device-simulator/requirements.lock.txt
+!/infra/
+/infra/*
+!/infra/home-assistant/
+/infra/home-assistant/*
+!/infra/home-assistant/compose.override.yaml
+!/infra/home-assistant/mosquitto.conf
+!/infra/home-assistant/.env.example
+!/infra/home-assistant/reuse.override.yaml
+!/tools/ha-check/
+runtime/
+password_file
+device-state.json
+fault-control.json
+*.sqlite3
 
 # Unity house. The project itself is created by Unity Hub and is regenerated
 # freely, so nothing under it is tracked; only our payload and README are.
