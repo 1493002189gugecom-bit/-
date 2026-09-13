@@ -49,21 +49,57 @@ function Invoke-Native {
 
     # Windows PowerShell 5.1 turns a native command's stderr into a terminating
     # error while $ErrorActionPreference is 'Stop', and Docker writes its build
-    # progress to stderr. The preference is relaxed for the call instead, and the
-    # exit code is checked explicitly by the caller.
+    # progress to stderr. The preference is relaxed and the output is captured so
+    # the caller can report the real reason for a failure.
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
         if ($PSBoundParameters.ContainsKey('StandardInput')) {
-            $StandardInput, $StandardInput | & $Command @Arguments 2>&1 | Out-Null
+            $output = $StandardInput, $StandardInput | & $Command @Arguments 2>&1
         }
         else {
-            & $Command @Arguments 2>&1 | Out-Null
+            $output = & $Command @Arguments 2>&1
         }
-        return $LASTEXITCODE
+        return [pscustomobject]@{
+            ExitCode = $LASTEXITCODE
+            Output   = (($output | Out-String).Trim())
+        }
     }
     finally {
         $ErrorActionPreference = $previous
+    }
+}
+
+function Get-NativeFailureDetail {
+    param([string]$Output)
+
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        return 'no output'
+    }
+    # mosquitto_passwd and docker never echo the credential, so the last line is
+    # safe to surface and is the only useful diagnostic.
+    return ($Output -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+}
+
+function Remove-BrokerPasswordFile {
+    <#
+    Build into a fresh name and rename on the host afterwards. mosquitto_passwd -c
+    refuses to overwrite an existing file, and a Docker Desktop bind mount keeps
+    reporting a host-deleted file as still present inside the container.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Target)
+
+    $staging = Join-Path $runtime $Target
+    if (Test-Path $staging -PathType Leaf) {
+        Remove-Item -Force $staging
+    }
+    $runtimeDockerPath = $runtime.Replace('\', '/')
+    $null = Invoke-Native -Command 'docker' -Arguments @(
+        'run', '--rm', '--volume', "${runtimeDockerPath}:/work",
+        'eclipse-mosquitto:2', 'rm', '-f', "/work/$Target"
+    )
+    if (Test-Path $staging -PathType Leaf) {
+        throw "$Target still exists after removal; refusing to reuse stale credentials."
     }
 }
 
@@ -71,20 +107,25 @@ function Invoke-MosquittoPasswd {
     param(
         [Parameter(Mandatory = $true)][string]$Username,
         [Parameter(Mandatory = $true)][string]$Password,
+        [string]$Target = 'password_file',
         [switch]$Create
     )
 
     $runtimeDockerPath = $runtime.Replace('\', '/')
+    # The password is written to a fresh file name. mosquitto_passwd -c refuses to
+    # overwrite, and a Docker Desktop bind mount keeps reporting a host-deleted
+    # file as existing inside the container, so reusing the final name is not
+    # reliable. The caller renames the finished file into place.
     $arguments = @('run', '--rm', '-i', '--volume', "${runtimeDockerPath}:/work", 'eclipse-mosquitto:2', 'mosquitto_passwd')
     if ($Create) {
         $arguments += '-c'
     }
-    $arguments += @('/work/password_file', $Username)
+    $arguments += @("/work/$Target", $Username)
 
     # The password travels over stdin only, never as a command-line argument.
-    $exitCode = Invoke-Native -Command 'docker' -Arguments $arguments -StandardInput $Password
-    if ($exitCode -ne 0) {
-        throw "mosquitto_passwd failed for user '$Username' (exit $exitCode)"
+    $result = Invoke-Native -Command 'docker' -Arguments $arguments -StandardInput $Password
+    if ($result.ExitCode -ne 0) {
+        throw "mosquitto_passwd failed for user '$Username' (exit $($result.ExitCode)): $(Get-NativeFailureDetail $result.Output)"
     }
 }
 
@@ -94,7 +135,12 @@ $passwordFileExists = Test-Path $passwordFile -PathType Leaf
 $stackEnvFileExists = Test-Path $stackEnvFile -PathType Leaf
 
 if ($passwordFileExists -xor $stackEnvFileExists) {
-    throw 'Credential state is incomplete: password_file and stack.env must either both exist or both be absent.'
+    if (-not $RotateCredentials) {
+        throw 'Credential state is incomplete: password_file and stack.env must either both exist or both be absent. Pass -RotateCredentials to regenerate both.'
+    }
+    # Rotation rewrites both files, so an interrupted earlier rotation is
+    # recoverable instead of leaving the operator stuck.
+    Write-Host 'Credential state is incomplete; regenerating both files.'
 }
 
 if (-not $passwordFileExists -or $RotateCredentials) {
@@ -104,11 +150,31 @@ if (-not $passwordFileExists -or $RotateCredentials) {
         $simPassword = New-RandomPassword
     }
 
-    if ($passwordFileExists) {
+    # Build into a fresh name, then move it into place on the host.
+    $stagingName = 'password_file.new'
+    Remove-BrokerPasswordFile -Target $stagingName
+    Invoke-MosquittoPasswd -Username 'homeassistant' -Password $haPassword -Target $stagingName -Create
+    Invoke-MosquittoPasswd -Username 'simulator' -Password $simPassword -Target $stagingName
+
+    # The broker runs as an unprivileged user inside the container, so the hash
+    # file must be readable there. 0644 exposes only hashes, never plaintext.
+    $runtimeDockerPathForChmod = $runtime.Replace('\', '/')
+    $chmodResult = Invoke-Native -Command 'docker' -Arguments @(
+        'run', '--rm', '--volume', "${runtimeDockerPathForChmod}:/work",
+        'eclipse-mosquitto:2', 'chmod', '644', "/work/$stagingName"
+    )
+    if ($chmodResult.ExitCode -ne 0) {
+        throw "Could not make the password file readable for the broker: $(Get-NativeFailureDetail $chmodResult.Output)"
+    }
+
+    $stagingPath = Join-Path $runtime $stagingName
+    if (-not (Test-Path $stagingPath -PathType Leaf)) {
+        throw "mosquitto_passwd reported success but $stagingName was not created."
+    }
+    if (Test-Path $passwordFile -PathType Leaf) {
         Remove-Item -Force $passwordFile
     }
-    Invoke-MosquittoPasswd -Username 'homeassistant' -Password $haPassword -Create
-    Invoke-MosquittoPasswd -Username 'simulator' -Password $simPassword
+    Move-Item -Force $stagingPath $passwordFile
 
     $stackEnv = @(
         'MQTT_USERNAME=simulator'
@@ -123,17 +189,6 @@ else {
     Write-Host 'Reusing existing local MQTT credentials (values not read or displayed).'
 }
 
-# The broker runs as an unprivileged user inside the container, so the hash file
-# must be readable there. 0644 exposes only password hashes, never plaintext.
-$runtimeDockerPathForChmod = $runtime.Replace('\', '/')
-$chmodExit = Invoke-Native -Command 'docker' -Arguments @(
-    'run', '--rm', '--volume', "${runtimeDockerPathForChmod}:/work",
-    'eclipse-mosquitto:2', 'chmod', '644', '/work/password_file'
-)
-if ($chmodExit -ne 0) {
-    throw "Could not make password_file readable for the broker (exit $chmodExit)"
-}
-
 $repoDockerPath = $RepoRoot.Replace('\', '/')
 $composeEnv = @(
     "SHV_MOSQUITTO_CONFIG=$repoDockerPath/infra/home-assistant/mosquitto.conf"
@@ -143,11 +198,11 @@ $composeEnv = @(
 ) -join "`n"
 Set-Content -Path (Join-Path $runtime 'compose.env') -Value $composeEnv -Encoding utf8
 
-$buildExit = Invoke-Native -Command 'docker' -Arguments @(
+$buildResult = Invoke-Native -Command 'docker' -Arguments @(
     'build', '--tag', 'shv-device-simulator:local',
     (Join-Path $RepoRoot 'apps\device-simulator')
 )
-if ($buildExit -ne 0) {
-    throw "Simulator image build failed (exit $buildExit)"
+if ($buildResult.ExitCode -ne 0) {
+    throw "Simulator image build failed: $(Get-NativeFailureDetail $buildResult.Output)"
 }
 Write-Host 'Built shv-device-simulator:local.'
