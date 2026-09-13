@@ -210,13 +210,20 @@ def main() -> int:
     utterance: list[np.ndarray] = []
     in_speech = False
 
-    print("ready: 请说“小屋小屋”或“你好小屋”（Ctrl+C 退出）")
+    wake_phrases = config.wake_words(args.keywords_file)
+    if wake_phrases:
+        spoken = "或".join(f"“{phrase}”" for phrase in wake_phrases)
+        print(f"ready: 请说{spoken}（Ctrl+C 退出）")
+    else:
+        print(f"ready: 未从 {args.keywords_file} 读到唤醒词，请检查该文件（Ctrl+C 退出）")
     log_event(
         "ready",
         state=state,
         input_device=input_device.name,
         output_device=output_target.describe() if output_target else None,
         idle_timeout_seconds=args.idle_timeout,
+        wake_words=wake_phrases,
+        agent_enabled=agent is not None,
     )
     run_deadline = time.monotonic() + args.run_seconds if args.run_seconds > 0 else None
     try:

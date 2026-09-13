@@ -201,6 +201,27 @@ def vad_model() -> Path:
     return require(models_dir() / VAD_MODEL)
 
 
+def wake_words(keywords_file: Path) -> list[str]:
+    """Read the human-readable wake phrases out of a sherpa KWS keyword file.
+
+    A line looks like ``x iǎo w ū :2.0 #0.25 @小屋小屋``; the ``@`` field is the
+    phrase the user actually says. The loop reports these instead of a hardcoded
+    string, so changing the file cannot make the prompt lie.
+    """
+    path = Path(keywords_file)
+    if not path.exists():
+        return []
+    words: list[str] = []
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        _, marker, phrase = line.partition("@")
+        if marker and phrase.strip() and phrase.strip() not in words:
+            words.append(phrase.strip())
+    return words
+
+
 # ---------------------------------------------------------------- voice agent
 # The agent's LLM key lives in a local git-ignored file (or the environment).
 # It is never written to logs, exceptions, the repository, or a command line.
