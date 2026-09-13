@@ -142,14 +142,14 @@ docker compose --env-file runtime\home-assistant\compose.env `
   -f infra\home-assistant\compose.override.yaml up -d
 
 # 3) Point the existing MQTT integration at the new broker credentials.
-$env:HA_ENV_FILE     = 'E:\智能家居\runtime\home-assistant\ha.env'
-$env:SHV_ENV_FILE    = 'E:\智能家居\runtime\home-assistant\stack.env'
+$env:HA_ENV_FILE     = 'E:\smart-home\runtime\home-assistant\ha.env'
+$env:SHV_ENV_FILE    = 'E:\smart-home\runtime\home-assistant\stack.env'
 .\.venv\Scripts\python.exe tools\ha-check\setup_mqtt.py
 
 # 4) Run the HA-backed service on loopback.
 $env:HOME_SERVICE_BACKEND = 'ha'
 $env:HOME_ASSISTANT_URL   = 'http://127.0.0.1:8123'
-$env:HA_OPERATION_DB      = 'E:\智能家居\runtime\home-assistant\operations.sqlite3'
+$env:HA_OPERATION_DB      = 'E:\smart-home\runtime\home-assistant\operations.sqlite3'
 .\.venv\Scripts\python.exe apps\home-service\src\server.py
 
 # 5) Verify the whole loop, including fault injection.

@@ -899,12 +899,12 @@ Add this HA-mode sequence to `apps/home-service/README.md`:
 ```powershell
 .\tools\ha-check\prepare_stack.ps1
 docker compose --env-file runtime\home-assistant\compose.env -f D:\dac\docker-compose.yml -f infra\home-assistant\compose.override.yaml up -d
-$env:HA_ENV_FILE='E:\智能家居\runtime\home-assistant\ha.env'
-$env:SHV_ENV_FILE='E:\智能家居\runtime\home-assistant\stack.env'
+$env:HA_ENV_FILE='E:\smart-home\runtime\home-assistant\ha.env'
+$env:SHV_ENV_FILE='E:\smart-home\runtime\home-assistant\stack.env'
 .\.venv\Scripts\python.exe tools\ha-check\setup_mqtt.py
 $env:HOME_SERVICE_BACKEND='ha'
 $env:HOME_ASSISTANT_URL='http://127.0.0.1:8123'
-$env:HA_OPERATION_DB='E:\智能家居\runtime\home-assistant\operations.sqlite3'
+$env:HA_OPERATION_DB='E:\smart-home\runtime\home-assistant\operations.sqlite3'
 .\.venv\Scripts\python.exe apps\home-service\src\server.py
 ```
 
@@ -947,8 +947,8 @@ Expected: HA, Mosquitto and simulator are running; only HA publishes host port 8
 - [ ] **Step 3: Configure MQTT and verify entities**
 
 ```powershell
-$env:HA_ENV_FILE='E:\智能家居\runtime\home-assistant\ha.env'
-$env:SHV_ENV_FILE='E:\智能家居\runtime\home-assistant\stack.env'
+$env:HA_ENV_FILE='E:\smart-home\runtime\home-assistant\ha.env'
+$env:SHV_ENV_FILE='E:\smart-home\runtime\home-assistant\stack.env'
 .\.venv\Scripts\python.exe tools\ha-check\setup_mqtt.py
 .\.venv\Scripts\python.exe tools\ha-check\connection.py
 ```
@@ -960,8 +960,8 @@ Expected: MQTT setup reports existing/created without secrets; connection output
 ```powershell
 $env:HOME_SERVICE_BACKEND='ha'
 $env:HOME_ASSISTANT_URL='http://127.0.0.1:8123'
-$env:HA_ENV_FILE='E:\智能家居\runtime\home-assistant\ha.env'
-$env:HA_OPERATION_DB='E:\智能家居\runtime\home-assistant\operations.sqlite3'
+$env:HA_ENV_FILE='E:\smart-home\runtime\home-assistant\ha.env'
+$env:HA_OPERATION_DB='E:\smart-home\runtime\home-assistant\operations.sqlite3'
 .\.venv\Scripts\python.exe apps\home-service\src\server.py
 ```
 
@@ -970,7 +970,7 @@ Expected: service binds only `127.0.0.1:8765`, reports HA backend, and completes
 - [ ] **Step 5: Run automated real-stack acceptance**
 
 ```powershell
-$env:HA_ENV_FILE='E:\智能家居\runtime\home-assistant\ha.env'
+$env:HA_ENV_FILE='E:\smart-home\runtime\home-assistant\ha.env'
 .\.venv\Scripts\python.exe tools\ha-check\acceptance.py
 ```
 

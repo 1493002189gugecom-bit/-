@@ -43,7 +43,7 @@ HA 后端可以在**观察到真实状态**之后才报成功，并且离线、�
 命令：
 
 ```powershell
-$env:HA_ENV_FILE='E:\智能家居\runtime\home-assistant\ha.env'
+$env:HA_ENV_FILE='E:\smart-home\runtime\home-assistant\ha.env'
 .\.venv\Scripts\python.exe tools\ha-check\acceptance.py
 ```
 

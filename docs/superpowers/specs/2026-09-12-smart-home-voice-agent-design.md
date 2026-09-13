@@ -201,7 +201,7 @@ Unity 与本地 ASR/TTS/检测并行运行至少 30 分钟；记录 RAM/VRAM 峰
 3. 再完成权威状态/工具与最小 Unity 小屋闭环。
 4. 接入云端 Agent、人物检测与完整语音会话，进行并行与故障验收。
 
-设计已获批，下一阶段为实现计划。用户已授权将当前项目目录初始化为 Git 仓库并上传至 https://github.com/1493002189gugecom-bit/-.git 。首次上传仅包含本项目设计、说明与忽略规则；工作区内其他项目、个人脚本、本地调研记录及运行数据不纳入版本管理。
+设计已获批，下一阶段为实现计划。用户已授权将当前项目目录初始化为 Git 仓库并上传至 https://github.com/1493002189gugecom-bit/smart-home-voice-agent.git 。首次上传仅包含本项目设计、说明与忽略规则；工作区内其他项目、个人脚本、本地调研记录及运行数据不纳入版本管理。
 
 ## 12. 调研来源
 - SenseVoice：https://github.com/QwenAudio/SenseVoice
