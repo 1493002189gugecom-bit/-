@@ -455,6 +455,9 @@ The override must reset both existing host ports, mount repository-owned broker 
 
 ```yaml
 services:
+  homeassistant:
+    ports: !override
+      - "127.0.0.1:8123:8123"
   mosquitto:
     ports: !reset []
     volumes:
