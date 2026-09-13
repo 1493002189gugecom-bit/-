@@ -63,6 +63,121 @@ class Report:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f" - {detail}" if detail else ""), flush=True)
 
 
+def run_tools_only(service_url):
+    """Verify the tool contract against the live backend, with no LLM involved.
+
+    This is the half of the agent that actually touches devices, so it is worth
+    checking on its own and without an API key.
+    """
+    report = Report()
+    status, health = service_get(service_url, "/health")
+    report.record(
+        "home_service_reachable",
+        status == 200 and health.get("ok") is True,
+        f"http={status} backend={health.get('backend')}",
+    )
+    if status != 200:
+        return report
+
+    executor = HomeToolExecutor(service_url)
+
+    result = executor.execute("set_light", {"device_id": "living_room_light", "on": True}, "tools-light-on")
+    state = device_state(service_url, "living_room_light")
+    report.record(
+        "set_light_on",
+        result.ok and bool(state and state["state"].get("on")),
+        f"ok={result.ok} phrase={result.phrase!r} state={state and state['state']}",
+    )
+
+    result = executor.execute(
+        "set_light", {"device_id": "living_room_light", "brightness": 50}, "tools-light-50"
+    )
+    state = device_state(service_url, "living_room_light")
+    report.record(
+        "set_light_brightness_50",
+        result.ok and bool(state and state["state"].get("brightness") == 50),
+        f"brightness={state and state['state'].get('brightness')}",
+    )
+
+    # The same operation id must replay, not command the device a second time.
+    replay = executor.execute(
+        "set_light", {"device_id": "living_room_light", "brightness": 50}, "tools-light-50"
+    )
+    report.record(
+        "same_operation_id_replays",
+        replay.ok and replay.operation_id == "tools-light-50",
+        f"operation_id={replay.operation_id}",
+    )
+    conflict = executor.execute(
+        "set_light", {"device_id": "living_room_light", "brightness": 60}, "tools-light-50"
+    )
+    report.record(
+        "same_operation_id_with_other_arguments_conflicts",
+        (not conflict.ok) and conflict.error_code == "operation_id_conflict",
+        f"code={conflict.error_code}",
+    )
+
+    result = executor.execute(
+        "set_ac", {"device_id": "bedroom_ac", "mode": "cool", "target_temp": 24}, "tools-ac-24"
+    )
+    state = device_state(service_url, "bedroom_ac")
+    report.record(
+        "set_ac_cool_24",
+        result.ok
+        and bool(
+            state
+            and state["state"].get("mode") == "cool"
+            and state["state"].get("target_temp") == 24.0
+        ),
+        f"ok={result.ok} state={state and state['state']}",
+    )
+
+    query = executor.execute("query_room_status", {"room": "客厅"})
+    rooms = (query.data or {}).get("rooms") or []
+    report.record(
+        "query_room_status_returns_devices",
+        query.ok and any(room.get("devices") for room in rooms),
+        f"rooms={len(rooms)} devices={sum(len(room.get('devices') or []) for room in rooms)}",
+    )
+
+    # An offline device must fail without ever being actuated. Home Assistant
+    # reports an unavailable entity as a separate `online=false`, so the check
+    # restores availability and re-reads the real state instead of comparing an
+    # "unavailable" reading against a real one.
+    before = device_state(service_url, "living_room_light")
+    atomic_write_json(FAULT_FILE, {"device_id": "living_room_light", "online": False})
+    time.sleep(2.0)
+    try:
+        result = executor.execute(
+            "set_light", {"device_id": "living_room_light", "on": not before["state"].get("on")}, "tools-offline"
+        )
+        while_offline = device_state(service_url, "living_room_light")
+    finally:
+        atomic_write_json(FAULT_FILE, {"device_id": "living_room_light", "online": True})
+        time.sleep(2.5)
+    after = device_state(service_url, "living_room_light")
+    report.record(
+        "offline_fails_without_actuating",
+        (not result.ok)
+        and result.error_code == "offline"
+        and while_offline is not None
+        and while_offline.get("online") is False
+        and after is not None
+        and after["state"] == before["state"],
+        f"code={result.error_code} online_while_offline={while_offline and while_offline.get('online')} "
+        f"before={before['state']} after={after and after['state']}",
+    )
+
+    invalid = executor.execute("set_light", {"device_id": "garage_door", "on": True})
+    report.record(
+        "invalid_device_rejected_locally",
+        (not invalid.ok) and invalid.error_code in {"invalid_arguments", "unknown_tool"},
+        f"code={invalid.error_code}",
+    )
+
+    return report
+
+
 def run(service_url, key, model, base_url):
     report = Report()
 
@@ -152,17 +267,39 @@ def main():
     parser.add_argument("--service-url", default=config.home_service_url())
     parser.add_argument("--model", default=config.agent_model())
     parser.add_argument("--base-url", default=config.agent_base_url())
+    parser.add_argument(
+        "--tools-only",
+        action="store_true",
+        help="verify the device tool contract against the live backend, without any LLM",
+    )
     args = parser.parse_args()
+
+    started = time.monotonic()
+    if args.tools_only:
+        try:
+            report = run_tools_only(args.service_url)
+        except Exception as exc:  # noqa: BLE001 - report the class, never a secret
+            print(json.dumps({"ok": False, "error": type(exc).__name__}, ensure_ascii=False))
+            return 1
+        ok = bool(report.checks) and all(check["ok"] for check in report.checks)
+        print(
+            json.dumps(
+                {"ok": ok, "seconds": round(time.monotonic() - started, 1), "checks": report.checks},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if ok else 1
 
     key = config.agent_api_key()
     if not key:
         print(
-            f"DEEPSEEK_API_KEY is missing; put it in {config.agent_env_file()} (git-ignored).",
+            f"DEEPSEEK_API_KEY is missing; put it in {config.agent_env_file()} (git-ignored).\n"
+            "Use --tools-only to verify the device tools without an LLM.",
             file=sys.stderr,
         )
         return 2
 
-    started = time.monotonic()
     try:
         report = run(args.service_url, key, args.model, args.base_url)
     except AgentError as exc:
