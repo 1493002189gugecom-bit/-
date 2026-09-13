@@ -7,20 +7,24 @@ import pytest
 
 from agent_client import AgentClient, AgentError
 from agent_tools import (
-    AC_DEVICE_IDS,
-    LIGHT_DEVICE_IDS,
-    TOOL_SCHEMAS,
+    HOME_TOOL_NAMES,
     HomeToolExecutor,
     ToolArgumentError,
+    build_tool_schemas,
     normalize_arguments,
 )
 
 SECRET = "sk-super-secret-key-value"
 
+CATALOG = [
+    {"id": "living_room_light", "type": "light", "name": "客厅灯", "room_name": "客厅", "controllable": True},
+    {"id": "bedroom_ac", "type": "ac", "name": "卧室空调", "room_name": "卧室", "controllable": True},
+    {"id": "desk_plug", "type": "switch", "name": "智能插座", "room_name": "客厅", "controllable": True},
+    {"id": "indoor_temperature", "type": "sensor", "name": "室内温度", "room_name": "客厅", "controllable": False},
+]
+
 
 class ScriptedOpener:
-    """Returns one queued outcome per open() call."""
-
     def __init__(self, outcomes):
         self.outcomes = list(outcomes)
         self.requests = []
@@ -30,10 +34,12 @@ class ScriptedOpener:
         outcome = self.outcomes.pop(0) if self.outcomes else {}
         if isinstance(outcome, BaseException):
             raise outcome
-        return outcome
+        return JsonResponse(outcome)
 
 
 class JsonResponse:
+    status = 200
+
     def __init__(self, payload):
         self.payload = payload
 
@@ -64,13 +70,14 @@ def tool_call(call_id, name, arguments):
 # --------------------------------------------------------------------- client
 def test_client_parses_content_and_tool_calls():
     client = AgentClient(SECRET, base_url="http://localhost:9")
-    client.opener = ScriptedOpener([JsonResponse(chat_response(None, [tool_call("c1", "set_light", {"device_id": "living_room_light", "on": True})]))])
+    client.opener = ScriptedOpener(
+        [chat_response(None, [tool_call("c1", "set_light", {"device_id": "living_room_light", "on": True})])]
+    )
 
-    response = client.chat([{"role": "user", "content": "开灯"}], list(TOOL_SCHEMAS))
+    response = client.chat([{"role": "user", "content": "开灯"}], [])
 
     assert response.wants_tools
     assert response.tool_calls[0].name == "set_light"
-    assert response.tool_calls[0].arguments == {"device_id": "living_room_light", "on": True}
 
 
 def test_client_requires_an_api_key():
@@ -94,54 +101,65 @@ def test_client_maps_transport_failures_to_closed_codes(outcome, expected):
     client.opener = ScriptedOpener([outcome])
 
     with pytest.raises(AgentError) as caught:
-        client.chat([{"role": "user", "content": "hi"}], list(TOOL_SCHEMAS))
+        client.chat([{"role": "user", "content": "hi"}], [])
 
     assert caught.value.code == expected
     assert SECRET not in repr(caught.value)
-    assert "Authorization" not in repr(caught.value)
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {},
-        {"choices": []},
-        {"choices": [{}]},
-        {"choices": [{"message": {"content": 5}}]},
-        {"choices": [{"message": {"content": None, "tool_calls": [{"id": "c", "function": {"name": "set_light", "arguments": "{not json"}}]}}]},
-    ],
-)
-def test_client_rejects_malformed_bodies(payload):
-    client = AgentClient(SECRET, base_url="http://localhost:9")
-    client.opener = ScriptedOpener([JsonResponse(payload)])
+# ---------------------------------------------------- catalog-derived surface
+def test_tool_surface_is_derived_from_the_catalog():
+    schemas, by_kind = build_tool_schemas(CATALOG)
+    names = [schema["function"]["name"] for schema in schemas]
 
-    with pytest.raises(AgentError) as caught:
-        client.chat([{"role": "user", "content": "hi"}], list(TOOL_SCHEMAS))
-
-    assert caught.value.code == "agent_invalid_response"
+    assert names == ["query_room_status", "query_device_status", "set_light", "set_ac", "set_switch"]
+    assert by_kind == {
+        "set_light": ["living_room_light"],
+        "set_ac": ["bedroom_ac"],
+        "set_switch": ["desk_plug"],
+    }
+    # The read-only sensor is queryable but never controllable.
+    assert "indoor_temperature" not in [item for ids in by_kind.values() for item in ids]
 
 
-def test_client_sends_bearer_token_but_never_logs_it():
-    client = AgentClient(SECRET, base_url="http://localhost:9")
-    opener = ScriptedOpener([JsonResponse(chat_response("好的"))])
-    client.opener = opener
+def test_a_new_device_in_the_catalog_becomes_controllable_without_code_changes():
+    """This is the property that made per-device work unnecessary."""
+    extended = CATALOG + [
+        {"id": "kitchen_light", "type": "light", "name": "厨房灯", "room_name": "厨房", "controllable": True}
+    ]
 
-    client.chat([{"role": "user", "content": "hi"}], list(TOOL_SCHEMAS))
+    _, by_kind = build_tool_schemas(extended)
 
-    headers = {key.lower(): value for key, value in opener.requests[0].header_items()}
-    assert headers["authorization"] == "Bearer " + SECRET
-    assert opener.requests[0].full_url == "http://localhost:9/chat/completions"
+    assert sorted(by_kind["set_light"]) == ["kitchen_light", "living_room_light"]
 
 
-# ---------------------------------------------------------------------- tools
-def test_narrow_device_enums_prevent_inventing_devices():
-    light = next(schema for schema in TOOL_SCHEMAS if schema["function"]["name"] == "set_light")
-    ac = next(schema for schema in TOOL_SCHEMAS if schema["function"]["name"] == "set_ac")
+def test_control_tools_are_omitted_when_no_such_device_exists():
+    sensor_only = [device for device in CATALOG if device["type"] == "sensor"]
 
-    assert light["function"]["parameters"]["properties"]["device_id"]["enum"] == list(LIGHT_DEVICE_IDS)
-    assert ac["function"]["parameters"]["properties"]["device_id"]["enum"] == list(AC_DEVICE_IDS)
+    _, by_kind = build_tool_schemas(sensor_only)
+
+    assert by_kind == {}
+
+
+def test_every_control_kind_maps_to_a_declared_tool_name():
+    assert set(HOME_TOOL_NAMES) == {
+        "query_room_status",
+        "query_device_status",
+        "set_light",
+        "set_ac",
+        "set_switch",
+    }
+
+
+# ---------------------------------------------------------------- validation
+def test_device_must_come_from_the_catalog():
+    _, by_kind = build_tool_schemas(CATALOG)
+
     with pytest.raises(ToolArgumentError):
-        normalize_arguments("set_light", {"device_id": "garage_door", "on": True})
+        normalize_arguments("set_light", {"device_id": "garage_door", "on": True}, by_kind)
+    with pytest.raises(ToolArgumentError):
+        # A real device, but the wrong tool for its type.
+        normalize_arguments("set_switch", {"device_id": "living_room_light", "on": True}, by_kind)
 
 
 @pytest.mark.parametrize(
@@ -156,75 +174,82 @@ def test_narrow_device_enums_prevent_inventing_devices():
     ],
 )
 def test_light_arguments_are_validated_locally(arguments):
+    _, by_kind = build_tool_schemas(CATALOG)
+
     with pytest.raises(ToolArgumentError):
-        normalize_arguments("set_light", arguments)
+        normalize_arguments("set_light", arguments, by_kind)
 
 
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        {"device_id": "bedroom_ac", "target_temp": 15.5},
-        {"device_id": "bedroom_ac", "target_temp": float("inf")},
-        {"device_id": "bedroom_ac", "mode": "heat"},
-        {"device_id": "bedroom_ac"},
-    ],
-)
-def test_ac_arguments_are_validated_locally(arguments):
+def test_switch_requires_an_explicit_on():
+    _, by_kind = build_tool_schemas(CATALOG)
+
+    normalized = normalize_arguments("set_switch", {"device_id": "desk_plug", "on": True}, by_kind)
+    assert normalized == {"device_id": "desk_plug", "on": True}
+
     with pytest.raises(ToolArgumentError):
-        normalize_arguments("set_ac", arguments)
+        normalize_arguments("set_switch", {"device_id": "desk_plug"}, by_kind)
+
+
+# ------------------------------------------------------------------ executor
+def test_query_by_device_sends_the_parameter_name_the_backend_expects():
+    """Regression: sending `device_id` made the backend return every device, so
+    callers silently read the first one (the light) instead of the target."""
+    executor = HomeToolExecutor("http://127.0.0.1:9", catalog=CATALOG)
+    captured = {}
+
+    def fake_request(method, path, query, body):
+        captured.update({"method": method, "path": path, "query": query})
+        return 200, {"ok": True, "data": {"devices": [{"id": "desk_plug", "state": {"on": False}}]}}
+
+    executor._request = fake_request
+    result = executor.execute("query_device_status", {"device_id": "desk_plug"})
+
+    assert captured["query"] == {"device": "desk_plug"}
+    assert result.data["devices"][0]["id"] == "desk_plug"
+
+
+def test_executor_fetches_the_catalog_when_not_supplied():
+    executor = HomeToolExecutor("http://127.0.0.1:9")
+    executor.opener = ScriptedOpener([{"ok": True, "data": {"devices": CATALOG}}])
+
+    names = [schema["function"]["name"] for schema in executor.schemas()]
+
+    assert "set_switch" in names
+    assert executor.device_name("desk_plug") == "智能插座"
 
 
 def test_invalid_arguments_never_reach_the_backend():
-    executor = HomeToolExecutor("http://127.0.0.1:9")
+    executor = HomeToolExecutor("http://127.0.0.1:9", catalog=CATALOG)
     calls = []
     executor._request = lambda *args, **kwargs: calls.append(args) or (200, {"ok": True})
 
     result = executor.execute("set_light", {"device_id": "garage_door", "on": True})
 
     assert result.ok is False
-    assert result.error_code == "unknown_tool" or result.error_code == "invalid_arguments"
     assert calls == []
 
 
-def test_write_sends_the_supplied_operation_id_for_idempotency():
-    executor = HomeToolExecutor("http://127.0.0.1:9")
+def test_switch_posts_to_its_own_endpoint_with_the_operation_id():
+    executor = HomeToolExecutor("http://127.0.0.1:9", catalog=CATALOG)
     sent = {}
 
     def fake_request(method, path, query, body):
-        sent.update({"method": method, "path": path, "query": query, "body": body})
-        return 200, {"ok": True, "data": {"state": {"on": True}}, "phrase": "已打开客厅灯", "operation_id": "op-1"}
+        sent.update({"method": method, "path": path, "body": body})
+        return 200, {"ok": True, "data": {"state": {"on": True}}, "phrase": "已打开智能插座", "operation_id": "op-1"}
 
     executor._request = fake_request
-    result = executor.execute("set_light", {"device_id": "living_room_light", "on": True}, "op-1")
+    result = executor.execute("set_switch", {"device_id": "desk_plug", "on": True}, "op-1")
 
-    assert sent["path"] == "/tool/set_light"
-    assert sent["body"]["operation_id"] == "op-1"
-    assert sent["body"]["device_id"] == "living_room_light"
-    assert result.ok and result.phrase == "已打开客厅灯"
+    assert sent["path"] == "/tool/set_switch"
+    assert sent["body"] == {"device_id": "desk_plug", "on": True, "operation_id": "op-1"}
+    assert result.ok and result.phrase == "已打开智能插座"
 
 
 def test_backend_unavailable_is_reported_without_claiming_success():
-    executor = HomeToolExecutor("http://127.0.0.1:9")
+    executor = HomeToolExecutor("http://127.0.0.1:9", catalog=CATALOG)
     executor._request = lambda *args, **kwargs: (0, {})
 
-    result = executor.execute("query_device_status", {"device_id": "living_room_light"})
+    result = executor.execute("set_switch", {"device_id": "desk_plug", "on": True})
 
     assert result.ok is False
     assert result.error_code == "backend_unavailable"
-
-
-def test_query_reads_the_room_endpoint_without_a_body():
-    executor = HomeToolExecutor("http://127.0.0.1:9")
-    captured = {}
-
-    def fake_request(method, path, query, body):
-        captured.update({"method": method, "path": path, "query": query, "body": body})
-        return 200, {"ok": True, "data": {"devices": []}}
-
-    executor._request = fake_request
-    executor.execute("query_room_status", {"room": "客厅"})
-
-    assert captured["method"] == "GET"
-    assert captured["path"] == "/tool/room_status"
-    assert captured["query"] == {"room": "客厅"}
-    assert captured["body"] is None

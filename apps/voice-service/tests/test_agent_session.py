@@ -27,6 +27,9 @@ class FakeExecutor:
         self.calls = []
         self.results = list(results or [])
 
+    def schemas(self):
+        return [{"type": "function", "function": {"name": "set_light", "parameters": {}}}]
+
     def execute(self, name, arguments, operation_id=None):
         self.calls.append({"name": name, "arguments": arguments, "operation_id": operation_id})
         if self.results:

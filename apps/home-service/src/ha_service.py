@@ -18,7 +18,25 @@ DEVICE_IDS = {
     "desk_plug",
     "indoor_temperature",
 }
-CONTROL_TOOLS = ("query_room_status", "query_device_status", "set_light", "set_ac")
+CONTROL_TOOLS = (
+    "query_room_status",
+    "query_device_status",
+    "set_light",
+    "set_ac",
+    "set_switch",
+)
+
+# What each device type can be asked to do. The agent derives its tool surface
+# from this, so adding a device to the catalog makes it controllable without
+# touching any code.
+CAPABILITIES = {
+    "light": ("on", "brightness"),
+    "ac": ("on", "mode", "target_temp"),
+    "switch": ("on",),
+    "sensor": (),
+}
+# Tool kind -> the device type it may act on.
+KIND_DEVICE_TYPE = {"set_light": "light", "set_ac": "ac", "set_switch": "switch"}
 
 
 def load_catalog(path: str | Path) -> dict[str, dict[str, Any]]:
@@ -211,6 +229,8 @@ class HAServiceApp:
     def handle(self, method: str, path: str, query: dict[str, Any], body: dict[str, Any]):
         if method == "GET" and path == "/health":
             return 200, {"ok": True, "backend": "ha", "tools": list(CONTROL_TOOLS)}
+        if method == "GET" and path == "/catalog":
+            return 200, {"ok": True, "data": {"devices": self.catalog_view()}}
         if method == "GET" and path == "/tool/device_status":
             return self._query_devices(self._first(query, "device"), self._first(query, "room"))
         if method == "GET" and path == "/tool/room_status":
@@ -219,7 +239,27 @@ class HAServiceApp:
             return self._control("set_light", body)
         if method == "POST" and path == "/tool/set_ac":
             return self._control("set_ac", body)
+        if method == "POST" and path == "/tool/set_switch":
+            return self._control("set_switch", body)
         return 404, {"ok": False, "error": f"no route for {method} {path}"}
+
+    def catalog_view(self) -> list[dict[str, Any]]:
+        """Describe every device so a caller can build its own tool surface."""
+        view = []
+        for device_id, record in self.catalog.items():
+            capabilities = list(CAPABILITIES.get(record["type"], ()))
+            view.append(
+                {
+                    "id": device_id,
+                    "type": record["type"],
+                    "name": record["name"],
+                    "room_id": record["room_id"],
+                    "room_name": record["room_name"],
+                    "capabilities": capabilities,
+                    "controllable": bool(capabilities),
+                }
+            )
+        return view
 
     @staticmethod
     def _first(query: dict[str, Any], name: str) -> str | None:
@@ -292,11 +332,11 @@ class HAServiceApp:
     def _normalize_request(self, kind: str, body: dict[str, Any]):
         if not isinstance(body, dict):
             raise ValueError("body")
-        allowed = (
-            {"device_id", "operation_id", "on", "brightness"}
-            if kind == "set_light"
-            else {"device_id", "operation_id", "on", "mode", "target_temp"}
-        )
+        allowed = {
+            "set_light": {"device_id", "operation_id", "on", "brightness"},
+            "set_ac": {"device_id", "operation_id", "on", "mode", "target_temp"},
+            "set_switch": {"device_id", "operation_id", "on"},
+        }[kind]
         if set(body) - allowed:
             raise ValueError("unknown fields")
         operation_id = body.get("operation_id")
@@ -312,7 +352,11 @@ class HAServiceApp:
                 raise ValueError("on")
             params["on"] = body["on"]
 
-        if kind == "set_light":
+        if kind == "set_switch":
+            if "on" not in params:
+                raise ValueError("switch params")
+            target = {"on": params["on"]}
+        elif kind == "set_light":
             if "brightness" in body:
                 brightness = body["brightness"]
                 if isinstance(brightness, bool) or not isinstance(brightness, int) or not 0 <= brightness <= 100:
@@ -367,7 +411,7 @@ class HAServiceApp:
             if not reservation.created:
                 return self._stored_result(reservation.operation)
 
-            expected_type = "light" if kind == "set_light" else "ac"
+            expected_type = KIND_DEVICE_TYPE[kind]
             record = self.catalog.get(device_id)
             if record is None:
                 return self._reject(reservation.operation, "not_found")
@@ -457,9 +501,11 @@ class HAServiceApp:
         domain = record["domain"]
         services = record["services"]
         params = operation.params
-        if operation.kind == "set_light":
+        if operation.kind in ("set_light", "set_switch"):
             if params.get("on") is False:
                 return [(domain, services["off"], {"entity_id": entity_id})]
+            if operation.kind == "set_switch":
+                return [(domain, services["on"], {"entity_id": entity_id})]
             data = {"entity_id": entity_id}
             if "brightness" in params:
                 data["brightness_pct"] = params["brightness"]

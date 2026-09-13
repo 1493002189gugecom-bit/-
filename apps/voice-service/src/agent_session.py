@@ -13,8 +13,7 @@ from typing import Any
 
 from agent_client import AgentClient, AgentError, ChatResponse, ToolCall
 from agent_tools import (
-    TOOL_SCHEMAS,
-    WRITE_TOOLS,
+    CONTROL_KINDS,
     HomeToolExecutor,
     ToolResult,
     new_operation_id,
@@ -26,12 +25,24 @@ DEFAULT_DEADLINE_SECONDS = 20.0
 DEFAULT_MAX_MESSAGES = 12
 
 SYSTEM_PROMPT = (
-    "你是一个中文家庭语音助手，负责控制客厅灯和卧室空调。"
-    "只能通过提供的工具操作设备，不得编造设备状态。"
+    "你是一个中文家庭语音助手，负责通过提供的工具控制家里的设备。"
+    "只能操作工具允许的设备，不得编造设备状态，也不要声称控制列表以外的设备。"
     "如果用户表达含糊或缺少必要信息，先用一句话追问。"
     "设备操作结果以工具返回为准，不要说工具没有报告的成功。"
     "回复要口语化、简短，适合直接朗读，不要使用列表或 Markdown。"
 )
+
+
+def build_system_prompt(catalog: list[dict[str, Any]]) -> str:
+    """Tell the model exactly which devices exist, from the live catalog."""
+    controllable = [device for device in catalog if device.get("controllable")]
+    if not controllable:
+        return SYSTEM_PROMPT
+    described = "、".join(
+        f"{device.get('name') or device['id']}（{device['id']}，位于{device.get('room_name') or device.get('room_id')}）"
+        for device in controllable
+    )
+    return SYSTEM_PROMPT + f" 你目前可以控制：{described}。"
 
 ERROR_TEXT = {
     "agent_auth_failed": "语音助手鉴权失败，请检查本地密钥配置。",
@@ -58,7 +69,7 @@ class AgentReply:
 
     @property
     def wrote_device(self) -> bool:
-        return any(result.name in WRITE_TOOLS for result in self.tool_results)
+        return any(result.name in CONTROL_KINDS for result in self.tool_results)
 
 
 class AgentSession:
@@ -105,7 +116,7 @@ class AgentSession:
                 return self._fail("agent_timeout", collected)
 
             try:
-                response = self.client.chat(self._messages(), list(TOOL_SCHEMAS))
+                response = self.client.chat(self._messages(), self.executor.schemas())
             except AgentError as exc:
                 return self._fail(exc.code, collected)
 
@@ -161,7 +172,7 @@ class AgentSession:
         # operation instead of commanding the device a second time.
         key = call.name + ":" + _canonical(call.arguments)
         operation_id = None
-        if call.name in WRITE_TOOLS:
+        if call.name in CONTROL_KINDS:
             operation_id = write_operations.get(key)
             if operation_id is None:
                 operation_id = new_operation_id()
@@ -169,7 +180,7 @@ class AgentSession:
         return self.executor.execute(call.name, call.arguments, operation_id)
 
     def _final_text(self, response: ChatResponse, collected: list[ToolResult]) -> str:
-        writes = [result for result in collected if result.name in WRITE_TOOLS]
+        writes = [result for result in collected if result.name in CONTROL_KINDS]
         failed = [result for result in writes if not result.ok]
         if failed:
             # Model prose is discarded entirely: it cannot be trusted to admit a
@@ -233,4 +244,8 @@ def create_agent_session(
         model=model or config.agent_model(),
         timeout=timeout,
     )
-    return AgentSession(client, HomeToolExecutor(service_url), **session_options)
+    executor = HomeToolExecutor(service_url)
+    # The prompt names the devices the catalog actually exposes, so the model
+    # knows the real scope instead of guessing.
+    session_options.setdefault("system_prompt", build_system_prompt(executor.catalog()))
+    return AgentSession(client, executor, **session_options)
